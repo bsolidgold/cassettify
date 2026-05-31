@@ -46,10 +46,19 @@ def _interpret(line: str) -> str | None:
 # sit close together in the center with the tape window between them. The iconic
 # bottom stripe doubles as the download progress bar.
 
-_INNER = 64           # content width between the outer shell walls
+_INNER = 88           # content width between the outer shell walls
 _LC = _INNER - 6      # label inner width
-_HUB = ["│", "╲", "─", "╱"]   # rotating reel hub
-_TAPE = ["┌──────┐", "│▓▓░░▓▓│", "└──────┘"]  # tape window between the reels
+_GAP = " " * 8        # spacing that sets the reels apart around the tape window
+
+# Rotating reel hub spokes — 5 wide, 3 tall, narrow glyphs only (no wide unicode)
+_SPOKES = [
+    ["  │  ", "──┼──", "  │  "],
+    [" ╲ ╱ ", "  ┼  ", " ╱ ╲ "],
+    ["  │  ", "──┼──", "  │  "],
+    [" ╱ ╲ ", "  ┼  ", " ╲ ╱ "],
+]
+# Tape window between the reels — 9 wide, 5 tall
+_TAPE = ["┌───────┐", "│▓▓▓▓▓▓▓│", "│░░░░░░░│", "│▓▓▓▓▓▓▓│", "└───────┘"]
 
 
 def _fit(s: str, w: int) -> str:
@@ -64,18 +73,18 @@ def _center(s: str, w: int) -> str:
 
 
 def _reel(frame: int) -> list[str]:
-    return ["╭───╮", f"│ {_HUB[frame]} │", "╰───╯"]
+    return ["╭───────╮"] + [f"│ {r} │" for r in _SPOKES[frame]] + ["╰───────╯"]
 
 
 def _cassette(name, artist, album, done, total, status, tick, spinning) -> str:
     frame = tick % 4 if spinning else 2
     lr = _reel(frame)
     rr = _reel((frame + 2) % 4)
-    bar_w = _LC - 12
+    bar_w = _LC - 14
     filled = int(done / max(total, 1) * bar_w)
     bar = "▓" * filled + "░" * (bar_w - filled)
     pct = f"{int(done / max(total, 1) * 100)}%".rjust(4)
-    band = [lr[i] + "  " + _TAPE[i] + "  " + rr[i] for i in range(3)]
+    band = [lr[i] + _GAP + _TAPE[i] + _GAP + rr[i] for i in range(5)]
     meta = artist + ("  ·  " + album if album else "")
 
     def shell(c: str) -> str:
@@ -93,10 +102,10 @@ def _cassette(name, artist, album, done, total, status, tick, spinning) -> str:
         label("  " + name),
         label("  " + "─" * (_LC - 6)),
         label("  " + meta),
-        label(""),
+        label(""), label(""), label(""),
         *[label(_center(b, _LC - 2)) for b in band],
-        label(""),
-        label("  " + _fit(status or "", _LC - 22) + f"   track {done}/{total}"),
+        label(""), label(""), label(""),
+        label("  " + _fit(status or "", _LC - 26) + f"   track {done}/{total}"),
         label("  " + bar + "  " + pct),
         shell("   └" + "─" * (_LC - 2) + "┘   "),
         screws,
@@ -111,7 +120,7 @@ class DownloadScreen(Screen):
 
     CSS = """
     #cassette {
-        height: 17;
+        height: 24;
         width: 100%;
         content-align: center middle;
         color: $primary;
