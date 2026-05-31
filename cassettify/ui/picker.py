@@ -25,6 +25,19 @@ def _short(p: str) -> str:
     return "~" + p[len(home):] if p.startswith(home) else p
 
 
+def _dedupe_by_id(items: list) -> list:
+    """Drop items with a duplicate `.id`, preserving order. DataTable row keys
+    must be unique, and Spotify sources can contain the same track/album twice."""
+    seen: set[str] = set()
+    out = []
+    for it in items:
+        if it.id in seen:
+            continue
+        seen.add(it.id)
+        out.append(it)
+    return out
+
+
 _CSS = """
 Screen #bg { dock: top; height: 1; color: $warning; padding: 0 2; }
 Screen #search { dock: top; margin: 1 2; display: none; }
@@ -86,8 +99,8 @@ class TrackScreen(Screen):
         self.app.call_from_thread(self._on_loaded, tracks)
 
     def _on_loaded(self, tracks: list[Track]) -> None:
-        self._tracks = tracks
-        ids = {t.id for t in tracks}
+        self._tracks = _dedupe_by_id(tracks)
+        ids = {t.id for t in self._tracks}
         if self._select_all:
             self._selected = set(ids)
         else:
@@ -282,9 +295,9 @@ class _SourceListScreen(_ListScreen):
         raise NotImplementedError
 
     def _on_loaded(self, items: list[Playlist]) -> None:
-        self._all_items = items
-        self._filtered = list(items)
-        for it in items:
+        self._all_items = _dedupe_by_id(items)
+        self._filtered = list(self._all_items)
+        for it in self._all_items:
             self.app._source_registry[it.id] = it
         self._refresh()
         self.query_one("#main-table", DataTable).focus()
@@ -485,8 +498,8 @@ class ArtistsScreen(_ListScreen):
         self.app.call_from_thread(self._on_loaded, artists)
 
     def _on_loaded(self, items: list[Artist]) -> None:
-        self._all_items = items
-        self._filtered = list(items)
+        self._all_items = _dedupe_by_id(items)
+        self._filtered = list(self._all_items)
         self._refresh()
         self.query_one("#main-table", DataTable).focus()
 
