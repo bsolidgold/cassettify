@@ -46,15 +46,17 @@ def _interpret(line: str) -> str | None:
 # wide — otherwise it renders flat/VHS-like.
 
 _INNER = 70   # content width between the box walls
-_LBL = 26     # label window inner width
+_LBL = 30     # label window inner width
 _BAR = 32     # progress bar segments
+_OUT = " " * 6  # outer margin (pulls reels in toward the center)
+_GAP = " "      # gap between reel and label window
 
-# Rotating reel spokes — 9 wide, 3 tall, narrow glyphs only (no wide unicode)
+# Rotating reel spokes — 7 wide, 3 tall, narrow glyphs only (no wide unicode)
 _SPOKES = [
-    ["    │    ", "────┼────", "    │    "],
-    [" ╲     ╱ ", "   ╲┼╱   ", " ╱     ╲ "],
-    ["    │    ", "────┼────", "    │    "],
-    [" ╱     ╲ ", "   ╱┼╲   ", " ╲     ╱ "],
+    ["   │   ", "───┼───", "   │   "],
+    [" ╲   ╱ ", "  ╲┼╱  ", " ╱   ╲ "],
+    ["   │   ", "───┼───", "   │   "],
+    [" ╱   ╲ ", "  ╱┼╲  ", " ╲   ╱ "],
 ]
 
 
@@ -64,7 +66,8 @@ def _fit(s: str, w: int) -> str:
 
 def _reel(frame: int) -> list[str]:
     sp = _SPOKES[frame]
-    return ["╭─────────────╮", "│ ╭─────────╮ │"] + [f"│ │{r}│ │" for r in sp] + ["│ ╰─────────╯ │", "╰─────────────╯"]
+    reel = ["╭─────────╮"] + [f"│ {r} │" for r in sp] + ["╰─────────╯"]  # 5 rows, 11 wide
+    return [" " * 11] + reel + [" " * 11]  # pad to 7 rows, vertically centered vs the label
 
 
 def _cassette(name, artist, album, done, total, status, tick, spinning) -> str:
@@ -98,7 +101,7 @@ def _cassette(name, artist, album, done, total, status, tick, spinning) -> str:
         row(""),
     ]
     for i in range(7):
-        lines.append(row("  " + lr[i] + "   " + label[i] + "   " + rr[i]))
+        lines.append(row(_OUT + lr[i] + _GAP + label[i] + _GAP + rr[i] + _OUT))
     lines += [
         row(""),
         row(f"  track {done} of {total}   {bar}  {pct}"),
