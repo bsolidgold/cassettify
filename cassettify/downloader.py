@@ -7,6 +7,7 @@ from typing import Callable
 from cassettify.spotify import Track
 
 FAILED_LOG = Path.home() / ".cassettify" / "failed.log"
+COOKIE_FILE = Path.home() / ".cassettify" / "cookies.txt"
 _OUTPUT_TEMPLATE = "{artists}/{album}/{track-number} - {title}.{output-ext}"
 
 
@@ -17,15 +18,19 @@ def download_track(
 ) -> bool:
     """Download a single track via spotdl. Streams status lines to status_cb."""
     full_template = str(Path(output_dir) / _OUTPUT_TEMPLATE)
+    cmd = [
+        sys.executable, "-u", "-m", "spotdl",
+        track.spotify_url,
+        "--output", full_template,
+        "--format", "mp3",
+        "--max-retries", "3",
+    ]
+    if COOKIE_FILE.exists():
+        cmd += ["--cookie-file", str(COOKIE_FILE)]
     try:
         env = {**os.environ, "PYTHONUNBUFFERED": "1"}
         proc = subprocess.Popen(
-            [
-                sys.executable, "-u", "-m", "spotdl",
-                track.spotify_url,
-                "--output", full_template,
-                "--format", "mp3",
-            ],
+            cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
@@ -36,14 +41,14 @@ def download_track(
             line = line.strip()
             if line and status_cb:
                 status_cb(_clean_status(line))
-        proc.wait(timeout=120)
+        proc.wait(timeout=300)
         if proc.returncode != 0:
             _log_failure(track, f"exit code {proc.returncode}")
             return False
         return True
     except subprocess.TimeoutExpired:
         proc.kill()
-        _log_failure(track, "timeout after 120s")
+        _log_failure(track, "timeout after 300s")
         return False
     except Exception as e:
         _log_failure(track, str(e))
