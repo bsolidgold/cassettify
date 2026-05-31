@@ -1,29 +1,62 @@
 from __future__ import annotations
-import requests
-from io import BytesIO
 from typing import Callable
 from textual.app import App, ComposeResult
-from textual.widgets import Static, ProgressBar, Header, Footer, Label
+from textual.widgets import Static, Header, Footer, Label
 from textual.containers import Horizontal, Vertical, ScrollableContainer
 from textual import work
 from cassettify.spotify import Track
-from cassettify.downloader import download_track as _download_track
+from cassettify.downloader import download_track as _dl
+
+# ── Cassette art ──────────────────────────────────────────────────────────────
+
+_LS = "─╲│╱"
+_RS = "─╱│╲"
 
 
-def _fetch_art(url: str, cols: int = 24) -> object | None:
-    """Fetch album art URL and return a rich_pixels Pixels object, or None."""
-    try:
-        from rich_pixels import Pixels
-        from PIL import Image
-        r = requests.get(url, timeout=5)
-        r.raise_for_status()
-        img = Image.open(BytesIO(r.content)).convert("RGB")
-        # Terminal cells are ~2:1 height:width, so double the columns for square art
-        img = img.resize((cols * 2, cols))
-        return Pixels.from_image(img)
-    except Exception:
-        return None
+def _fit(s: str, w: int) -> str:
+    return (s[:w - 1] + "…") if len(s) > w else s.ljust(w)
 
+
+def _cassette(
+    name: str, artist: str, album: str,
+    done: int, total: int,
+    status: str, tick: int, spinning: bool,
+) -> str:
+    lsp = _LS[tick % 4] if spinning else "·"
+    rsp = _RS[tick % 4] if spinning else "·"
+
+    n  = _fit(name,   20)
+    a  = _fit(artist, 20)
+    b  = _fit(album,  20)
+    ti = _fit(f"track {done} of {total}", 16)
+    st = _fit(status or "", 52)
+
+    BAR = 26
+    filled = int(done / max(total, 1) * BAR)
+    bar = "▓" * filled + "░" * (BAR - filled)
+    pct = f"{int(done / max(total, 1) * 100)}%".rjust(4)
+
+    HDR = _fit("  C A S S E T T I F Y           S I D E  A", 50)
+
+    return "\n".join([
+        f"  ╔{'═' * 56}╗",
+        f"  ║  ┌{'─' * 50}┐  ║",
+        f"  ║  │{HDR}│  ║",
+        f"  ║  └{'─' * 50}┘  ║",
+        f"  ║{' ' * 56}║",
+        f"  ║  ╭────────╮   ╔{'═' * 24}╗   ╭────────╮  ║",
+        f"  ║  │ ╭────╮ │   ║  {n}  ║   │ ╭────╮ │  ║",
+        f"  ║  │ │  {lsp} │ │   ║  {a}  ║   │ │  {rsp} │ │  ║",
+        f"  ║  │ ╰────╯ │   ║  {b}  ║   │ ╰────╯ │  ║",
+        f"  ║  ╰────────╯   ╚{'═' * 24}╝   ╰────────╯  ║",
+        f"  ║{' ' * 56}║",
+        f"  ║  {ti}   {bar}   {pct}  ║",
+        f"  ║  {st}  ║",
+        f"  ╚{'═' * 56}╝",
+    ])
+
+
+# ── App ───────────────────────────────────────────────────────────────────────
 
 class ProgressApp(App):
 
@@ -31,33 +64,24 @@ class ProgressApp(App):
     BINDINGS = [("q", "quit_app", "Quit")]
 
     CSS = """
-    #art {
-        width: 50;
-        height: 13;
+    #cassette {
+        height: 16;
+        width: 100%;
         content-align: center middle;
-        border: solid $primary;
-        color: $text-muted;
+        color: $primary;
+        text-style: bold;
     }
-    #track-info { height: 13; width: 1fr; padding: 1 2; }
-    #track-name { text-style: bold; margin-bottom: 1; }
-    #artist-album { color: $text-muted; margin-bottom: 1; }
-    #spotdl-status { color: $warning; }
-    #overall {
-        margin: 1 2;
-        height: 3;
-        padding: 0 1;
-    }
-    #overall-label { color: $text-muted; margin-bottom: 0; }
+    #panels { height: 1fr; margin: 0 2; }
+    #done-panel, #queue-panel { height: 1fr; width: 1fr; margin: 0 1; }
+    .panel-title { height: 1; text-style: bold; color: $text-muted; padding: 0 1; }
     #done-list, #queue-list {
         height: 1fr;
         border: solid $surface;
         padding: 0 1;
         overflow-y: auto;
     }
-    #done-panel, #queue-panel { height: 1fr; width: 1fr; margin: 0 1; }
-    .panel-title { color: $text-muted; text-style: bold; height: 1; }
-    .done-item { color: $success; }
-    .fail-item { color: $error; }
+    .done-item  { color: $success; }
+    .fail-item  { color: $error; }
     .queue-item { color: $text-muted; }
     """
 
@@ -68,25 +92,23 @@ class ProgressApp(App):
         on_success: Callable[[Track], None] | None = None,
     ) -> None:
         super().__init__()
-        self._tracks = tracks
+        self._tracks     = tracks
         self._output_dir = output_dir
         self._on_success = on_success
+        self._cur_name   = ""
+        self._cur_artist = ""
+        self._cur_album  = ""
+        self._cur_status = ""
+        self._done       = 0
+        self._spinning   = False
+        self._tick       = 0
+        self._finished   = False
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=False)
-        yield Horizontal(
-            Static("♫", id="art"),
-            Vertical(
-                Static("", id="track-name"),
-                Static("", id="artist-album"),
-                Static("", id="spotdl-status"),
-                id="track-info",
-            ),
-        )
-        yield Vertical(
-            Static("", id="overall-label"),
-            ProgressBar(total=len(self._tracks), show_eta=False, id="progress"),
-            id="overall",
+        yield Static(
+            _cassette("", "", "", 0, len(self._tracks), "", 0, False),
+            id="cassette",
         )
         yield Horizontal(
             Vertical(
@@ -99,6 +121,7 @@ class ProgressApp(App):
                 ScrollableContainer(id="queue-list"),
                 id="queue-panel",
             ),
+            id="panels",
         )
         yield Footer()
 
@@ -106,69 +129,64 @@ class ProgressApp(App):
         queue = self.query_one("#queue-list")
         for t in self._tracks:
             queue.mount(Label(f"  {t.artist} — {t.name}", classes="queue-item", id=f"q-{t.id}"))
-        self._run_downloads()
+        self.set_interval(0.12, self._animate)
+        self._run_all()
+
+    def _animate(self) -> None:
+        self._tick += 1
+        self.query_one("#cassette", Static).update(
+            _cassette(
+                self._cur_name, self._cur_artist, self._cur_album,
+                self._done, len(self._tracks),
+                self._cur_status, self._tick, self._spinning,
+            )
+        )
 
     @work(thread=True)
-    def _run_downloads(self) -> None:
-        done = 0
+    def _run_all(self) -> None:
         for track in self._tracks:
-            self.app.call_from_thread(self._set_now_playing, track, done)
-            if track.album_art_url:
-                art = _fetch_art(track.album_art_url)
-                self.app.call_from_thread(self._set_art, art)
+            self._cur_name   = track.name
+            self._cur_artist = track.artist
+            self._cur_album  = track.album
+            self._cur_status = "Searching…"
+            self._spinning   = True
 
-            def on_status(line: str, t: Track = track) -> None:
+            self.app.call_from_thread(self._remove_from_queue, track)
+
+            def on_status(line: str) -> None:
                 if line:
-                    self.app.call_from_thread(
-                        self.query_one("#spotdl-status", Static).update,
-                        f"  {line[:80]}"
-                    )
+                    self._cur_status = line[:58]
 
-            success = _download_track(track, self._output_dir, on_status)
+            success = _dl(track, self._output_dir, on_status)
+
             if success and self._on_success:
                 self._on_success(track)
-            done += 1
-            self.app.call_from_thread(self._mark_done, track, success, done)
 
-        self.app.call_from_thread(self._show_complete, done)
+            self._done += 1
+            self.app.call_from_thread(self._add_to_done, track, success)
 
-    def _set_now_playing(self, track: Track, done: int) -> None:
-        self.query_one("#track-name", Static).update(f"[bold]{track.name}[/bold]")
-        self.query_one("#artist-album", Static).update(f"{track.artist}  ·  {track.album}")
-        self.query_one("#spotdl-status", Static).update("  Searching...")
-        self.query_one("#overall-label", Static).update(
-            f"  Downloading track {done + 1} of {len(self._tracks)}"
-        )
-        # Remove from queue
+        self._finished   = True
+        self._spinning   = False
+        self._cur_name   = "All done!"
+        self._cur_artist = f"{self._done} tracks downloaded"
+        self._cur_album  = ""
+        self._cur_status = "Press Q to quit"
+
+    def _remove_from_queue(self, track: Track) -> None:
+        remaining = len(self._tracks) - self._done - 1
+        self.query_one("#queue-title", Static).update(f"Queue  ({remaining} remaining)")
         try:
             self.query_one(f"#q-{track.id}").remove()
         except Exception:
             pass
-        remaining = len(self._tracks) - done - 1
-        self.query_one("#queue-title", Static).update(f"Queue  ({remaining} remaining)")
 
-    def _set_art(self, art: object | None) -> None:
-        widget = self.query_one("#art", Static)
-        widget.update(art if art is not None else "♫")
-
-    def _mark_done(self, track: Track, success: bool, done: int) -> None:
-        self.query_one("#progress", ProgressBar).advance(1)
-        self.query_one("#spotdl-status", Static).update("")
-        done_list = self.query_one("#done-list")
-        if success:
-            done_list.mount(Label(f"✓  {track.name}", classes="done-item"))
-        else:
-            done_list.mount(Label(f"✗  {track.name}", classes="fail-item"))
-
-    def _show_complete(self, done: int) -> None:
-        total = len(self._tracks)
-        self.query_one("#track-name", Static).update(
-            f"[bold green]All done![/bold green]  {done}/{total} downloaded"
+    def _add_to_done(self, track: Track, success: bool) -> None:
+        self.query_one("#done-list").mount(
+            Label(
+                f"✓  {track.name}" if success else f"✗  {track.name}",
+                classes="done-item" if success else "fail-item",
+            )
         )
-        self.query_one("#artist-album", Static).update("")
-        self.query_one("#spotdl-status", Static).update("")
-        self.query_one("#overall-label", Static).update("")
-        self.query_one("#art", Static).update("♫")
 
     def action_quit_app(self) -> None:
         self.exit()
