@@ -1,6 +1,6 @@
 # 🎵 cassettify
 
-Download your Spotify library to tagged MP3s — organized, art-embedded, and ready to drag onto your iPod Classic.
+Download your Spotify library to tagged MP3s — organized, art-embedded, and ready to play anywhere.
 
 Cassettify connects to your Spotify account and gives you an interactive terminal UI to browse your **playlists, liked songs, saved albums, and followed artists**, pick exactly what you want, and download it via YouTube Music (using [spotdl](https://github.com/spotDL/spotify-downloader)). Downloads run in the background with an animated cassette-tape progress screen while you keep browsing.
 
@@ -45,8 +45,8 @@ On first launch, a setup wizard connects your Spotify account (see **First run**
 cassettify                           # interactive library browser
 cassettify "Dark Side of the Moon"   # download a specific playlist by name, skip the browser
 cassettify --all                     # queue every playlist
-cassettify --output ~/Music/iPod     # use this output folder for this run only
-cassettify --set-output ~/Music/iPod # permanently change the output folder (offers to move your library)
+cassettify --output ~/Music/Downloads     # use this output folder for this run only
+cassettify --set-output ~/Music/Downloads # permanently change the output folder (offers to move your library)
 cassettify --setup                   # re-run the setup wizard (re-auth, change folder, move library)
 cassettify --cookies auto            # grab YouTube cookies from your browser (see Rate limits)
 cassettify --cookies chrome          # ...or from a specific browser
@@ -138,7 +138,7 @@ Credentials are saved to `~/.cassettify/config.json` with owner-only permissions
 Two ways:
 
 ```bash
-cassettify --set-output ~/Music/iPod
+cassettify --set-output ~/Music/Downloads
 ```
 
 This updates the saved default and, if your old folder has music, asks whether to move it. Or re-run `cassettify --setup` — the folder step pre-fills your current location and offers a **"Move my existing tracks"** checkbox.

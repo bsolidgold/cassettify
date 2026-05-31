@@ -9,7 +9,7 @@ from cassettify.ui.app import run_wizard, run_app
 
 app = typer.Typer(
     name="cassettify",
-    help="Download your Spotify playlists for your iPod Classic.",
+    help="Download your Spotify library to tagged, organized MP3s.",
     add_completion=False,
 )
 
