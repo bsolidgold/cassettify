@@ -2,38 +2,58 @@ from __future__ import annotations
 import subprocess
 import sys
 from pathlib import Path
+from typing import Callable
 from cassettify.spotify import Track
 
 FAILED_LOG = Path.home() / ".cassettify" / "failed.log"
-
 _OUTPUT_TEMPLATE = "{artists}/{album}/{track-number} - {title}.{output-ext}"
 
 
-def download_track(track: Track, output_dir: str) -> bool:
-    """Download a single track via spotdl. Returns True on success."""
+def download_track(
+    track: Track,
+    output_dir: str,
+    status_cb: Callable[[str], None] | None = None,
+) -> bool:
+    """Download a single track via spotdl. Streams status lines to status_cb."""
     full_template = str(Path(output_dir) / _OUTPUT_TEMPLATE)
     try:
-        result = subprocess.run(
+        proc = subprocess.Popen(
             [
                 sys.executable, "-m", "spotdl",
                 track.spotify_url,
                 "--output", full_template,
                 "--format", "mp3",
             ],
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
             text=True,
-            timeout=120,
         )
-        if result.returncode != 0:
-            _log_failure(track, result.stderr.strip())
+        for line in proc.stdout:
+            line = line.strip()
+            if line and status_cb:
+                status_cb(_clean_status(line))
+        proc.wait(timeout=120)
+        if proc.returncode != 0:
+            _log_failure(track, f"exit code {proc.returncode}")
             return False
         return True
     except subprocess.TimeoutExpired:
+        proc.kill()
         _log_failure(track, "timeout after 120s")
         return False
     except Exception as e:
         _log_failure(track, str(e))
         return False
+
+
+def _clean_status(line: str) -> str:
+    """Strip ANSI codes and log prefixes from spotdl output."""
+    import re
+    line = re.sub(r'\x1b\[[0-9;]*m', '', line)
+    for prefix in ("INFO", "WARNING", "ERROR", "DEBUG", "spotdl"):
+        if line.startswith(prefix):
+            line = line[len(prefix):].lstrip(" :-|")
+    return line.strip()
 
 
 def _log_failure(track: Track, reason: str) -> None:

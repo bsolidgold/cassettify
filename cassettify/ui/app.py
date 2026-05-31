@@ -3,7 +3,6 @@ import spotipy
 from cassettify.config import Config
 from cassettify.spotify import get_all_sources, get_tracks_for_source, Track, Playlist
 from cassettify import cache
-from cassettify.downloader import download_track
 from cassettify.ui.wizard import WizardApp
 from cassettify.ui.picker import PickerApp
 from cassettify.ui.progress import ProgressApp
@@ -38,10 +37,7 @@ def run_downloads(tracks: list[Track], output_dir: str) -> None:
         print("Nothing new to download — all tracks already in cache.")
         return
 
-    def download_and_cache(track):
-        success = download_track(track, output_dir)
-        if success:
-            cache.add(track.id)
-        return success
+    def on_success(track: Track) -> None:
+        cache.add(track.id)
 
-    ProgressApp(new_tracks, download_and_cache).run()
+    ProgressApp(new_tracks, output_dir, on_success).run()
