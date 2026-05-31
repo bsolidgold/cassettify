@@ -48,7 +48,8 @@ def _interpret(line: str) -> str | None:
 
 _INNER = 88           # content width between the outer shell walls
 _LC = _INNER - 6      # label inner width
-_GAP = " " * 8        # spacing that sets the reels apart around the tape window
+_TW = _LC - 12        # title/meta text width to the right of the [A] badge
+_GAP = " " * 2        # small gap between each reel and the (wide) tape window
 
 # Rotating reel hub spokes — 5 wide, 3 tall, narrow glyphs only (no wide unicode)
 _SPOKES = [
@@ -58,7 +59,7 @@ _SPOKES = [
     [" ╱ ╲ ", "  ┼  ", " ╲ ╱ "],
 ]
 # Tape window between the reels — 21 wide, 5 tall, with a scrolling-tape animation
-_TAPE_W = 19          # inner width of the window
+_TAPE_W = 31          # inner width of the window
 _TAPE_PAT = "╱╱╱ "    # scrolls horizontally to read as moving tape
 
 
@@ -109,11 +110,10 @@ def _cassette(name, artist, album, done, total, status, tick, spinning) -> str:
         "  ╔" + "═" * _INNER + "╗",
         screws,
         shell("   ┌" + "─" * (_LC - 2) + "┐   "),
-        label(" [A]"),
-        label("  " + name),
-        label("  " + "─" * (_LC - 6)),
-        label("  " + meta),
-        label(""),
+        label("  ╭───╮   " + _fit(name, _TW)),
+        label("  │ A │   " + "─" * (_TW - 2)),
+        label("  ╰───╯   " + _fit(meta, _TW)),
+        label(""), label(""),
         *[label(_center(b, _LC - 2)) for b in band],
         label(""), label(""), label(""), label(""),
         label("  " + _fit(status or "", _LC - 26) + f"   track {done}/{total}"),
