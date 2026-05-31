@@ -57,8 +57,9 @@ _SPOKES = [
     ["  │  ", "──┼──", "  │  "],
     [" ╱ ╲ ", "  ┼  ", " ╲ ╱ "],
 ]
-# Tape window between the reels — 9 wide, 5 tall
-_TAPE = ["┌───────┐", "│▓▓▓▓▓▓▓│", "│░░░░░░░│", "│▓▓▓▓▓▓▓│", "└───────┘"]
+# Tape window between the reels — 21 wide, 5 tall, with a scrolling-tape animation
+_TAPE_W = 19          # inner width of the window
+_TAPE_PAT = "╱╱╱ "    # scrolls horizontally to read as moving tape
 
 
 def _fit(s: str, w: int) -> str:
@@ -76,6 +77,15 @@ def _reel(frame: int) -> list[str]:
     return ["╭───────╮"] + [f"│ {r} │" for r in _SPOKES[frame]] + ["╰───────╯"]
 
 
+def _tape(tick: int, spinning: bool) -> list[str]:
+    strip = _TAPE_PAT * (_TAPE_W // len(_TAPE_PAT) + 2)
+    o1 = (tick % len(_TAPE_PAT)) if spinning else 0
+    o2 = ((tick + 2) % len(_TAPE_PAT)) if spinning else 0
+    r1 = strip[o1:o1 + _TAPE_W]
+    r2 = strip[o2:o2 + _TAPE_W]
+    return ["┌" + "─" * _TAPE_W + "┐", "│" + r1 + "│", "│" + r2 + "│", "│" + r1 + "│", "└" + "─" * _TAPE_W + "┘"]
+
+
 def _cassette(name, artist, album, done, total, status, tick, spinning) -> str:
     frame = tick % 4 if spinning else 2
     lr = _reel(frame)
@@ -84,7 +94,8 @@ def _cassette(name, artist, album, done, total, status, tick, spinning) -> str:
     filled = int(done / max(total, 1) * bar_w)
     bar = "▓" * filled + "░" * (bar_w - filled)
     pct = f"{int(done / max(total, 1) * 100)}%".rjust(4)
-    band = [lr[i] + _GAP + _TAPE[i] + _GAP + rr[i] for i in range(5)]
+    window = _tape(tick, spinning)
+    band = [lr[i] + _GAP + window[i] + _GAP + rr[i] for i in range(5)]
     meta = artist + ("  ·  " + album if album else "")
 
     def shell(c: str) -> str:
@@ -102,9 +113,9 @@ def _cassette(name, artist, album, done, total, status, tick, spinning) -> str:
         label("  " + name),
         label("  " + "─" * (_LC - 6)),
         label("  " + meta),
-        label(""), label(""), label(""),
+        label(""),
         *[label(_center(b, _LC - 2)) for b in band],
-        label(""), label(""), label(""),
+        label(""), label(""), label(""), label(""),
         label("  " + _fit(status or "", _LC - 26) + f"   track {done}/{total}"),
         label("  " + bar + "  " + pct),
         shell("   └" + "─" * (_LC - 2) + "┘   "),
