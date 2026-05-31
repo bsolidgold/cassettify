@@ -72,11 +72,11 @@ cassettify --setup                  # re-run first-run wizard
 
 ### Normal run (config exists)
 1. Spotify token refreshed silently if expired
-2. Playlists fetched from Spotify API
+2. If playlist name/URL passed as argument, skip to step 4. If `--all`, queue all playlists and skip to step 4.
 3. Picker UI: browse, search, select one or many playlists
 4. Track list fetched; each track checked against `~/.cassettify/cache.json`
 5. Already-downloaded tracks skipped; new tracks queued
-6. Download loop: one track at a time via spotdl subprocess
+6. Download loop: tracks downloaded sequentially via spotdl subprocess (one at a time — avoids rate limiting)
 7. Progress UI updated live — album art, artist, album, track name, progress bar
 8. On completion: track written to cache, filed as `<output>/<Artist>/<Album>/<track>.mp3`
 9. End-of-session summary: downloaded, skipped, failed counts
@@ -174,5 +174,5 @@ No single track failure stops the queue. The download loop is resilient — fini
 
 ### Homebrew
 - Formula at `Formula/cassettify.rb` in the repo
-- Users tap via: `brew tap bretgold/cassettify && brew install cassettify`
+- Users tap via: `brew tap bsolidgold/cassettify && brew install cassettify`
 - Formula installs the PyPI package via `pip` in a virtual env (standard pattern)
