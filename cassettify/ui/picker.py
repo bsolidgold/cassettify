@@ -277,10 +277,11 @@ class PlaylistsScreen(_ListScreen):
         self.query_one("#main-table", DataTable).focus()
 
     def _row_values(self, item: Playlist) -> tuple:
-        sel = self.app._selection.get(item.id)
-        check = "✓" if item.id in self.app._selection else " "
-        label = "all" if sel is None else (f"{len(sel)} tracks" if sel else "")
-        return check, item.name, str(item.track_count), label
+        if item.id not in self.app._selection:
+            return " ", item.name, str(item.track_count), ""
+        sel = self.app._selection[item.id]
+        label = "all" if sel is None else f"{len(sel)} tracks"
+        return "✓", item.name, str(item.track_count), label
 
     def _item_key(self, item: Playlist) -> str:
         return item.id
@@ -361,10 +362,11 @@ class SavedAlbumsScreen(_ListScreen):
         self.query_one("#main-table", DataTable).focus()
 
     def _row_values(self, item: Playlist) -> tuple:
-        sel = self.app._selection.get(item.id)
-        check = "✓" if item.id in self.app._selection else " "
-        label = "all" if sel is None else (f"{len(sel)} tracks" if sel else "")
-        return check, item.name, str(item.track_count), label
+        if item.id not in self.app._selection:
+            return " ", item.name, str(item.track_count), ""
+        sel = self.app._selection[item.id]
+        label = "all" if sel is None else f"{len(sel)} tracks"
+        return "✓", item.name, str(item.track_count), label
 
     def _item_key(self, item: Playlist) -> str:
         return item.id
@@ -483,10 +485,11 @@ class ArtistAlbumsScreen(_ListScreen):
         self.query_one("#main-table", DataTable).focus()
 
     def _row_values(self, item: Playlist) -> tuple:
-        sel = self.app._selection.get(item.id)
-        check = "✓" if item.id in self.app._selection else " "
-        label = "all" if sel is None else (f"{len(sel)} tracks" if sel else "")
-        return check, item.name, str(item.track_count), label
+        if item.id not in self.app._selection:
+            return " ", item.name, str(item.track_count), ""
+        sel = self.app._selection[item.id]
+        label = "all" if sel is None else f"{len(sel)} tracks"
+        return "✓", item.name, str(item.track_count), label
 
     def _item_key(self, item: Playlist) -> str:
         return item.id
