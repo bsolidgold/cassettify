@@ -1,10 +1,12 @@
 from __future__ import annotations
 import time
+from pathlib import Path
 from dataclasses import dataclass
 from textual.app import App, ComposeResult
 from textual.screen import Screen
 from textual.widgets import DataTable, Input, Static, Footer, Header, LoadingIndicator
 from textual.containers import Center
+from textual.coordinate import Coordinate
 from textual import on, work
 from cassettify.spotify import (
     Playlist, Track, Artist,
@@ -17,6 +19,11 @@ from cassettify.ui.progress import DownloadScreen, _interpret
 import spotipy
 
 # ── Shared CSS ────────────────────────────────────────────────────────────────
+
+def _short(p: str) -> str:
+    home = str(Path.home())
+    return "~" + p[len(home):] if p.startswith(home) else p
+
 
 _CSS = """
 Screen #bg { dock: top; height: 1; color: $warning; padding: 0 2; }
@@ -91,33 +98,46 @@ class TrackScreen(Screen):
         self.query_one("#main-table", DataTable).focus()
 
     def _refresh(self) -> None:
+        # Full rebuild — only used on initial load (resets scroll, so avoid on toggles)
         table = self.query_one("#main-table", DataTable)
         table.clear()
         for t in self._tracks:
             table.add_row("✓" if t.id in self._selected else " ", t.name, t.artist, t.album, key=t.id)
+        self._update_status()
+
+    def _update_status(self) -> None:
         n, total = len(self._selected), len(self._tracks)
         self.query_one("#status", Static).update(
             f"{n}/{total} selected  ·  Space toggle  ·  A all  ·  N none  ·  Esc done"
+            f"   ·   ⤓ {_short(self.app._output_dir)}"
         )
+
+    def _set_check(self, row: int, tid: str) -> None:
+        mark = "✓" if tid in self._selected else " "
+        self.query_one("#main-table", DataTable).update_cell_at(Coordinate(row, 0), mark)
 
     def _toggle_row(self, row: int) -> None:
         if row is None or row >= len(self._tracks):
             return
         tid = self._tracks[row].id
         self._selected.discard(tid) if tid in self._selected else self._selected.add(tid)
-        self._refresh()
-        self.query_one("#main-table", DataTable).move_cursor(row=row)
+        self._set_check(row, tid)  # in-place — preserves scroll position
+        self._update_status()
 
     def action_toggle_track(self) -> None:
         self._toggle_row(self.query_one("#main-table", DataTable).cursor_row)
 
     def action_select_all(self) -> None:
         self._selected = {t.id for t in self._tracks}
-        self._refresh()
+        for i, t in enumerate(self._tracks):
+            self._set_check(i, t.id)
+        self._update_status()
 
     def action_select_none(self) -> None:
         self._selected.clear()
-        self._refresh()
+        for i, t in enumerate(self._tracks):
+            self._set_check(i, t.id)
+        self._update_status()
 
     def action_confirm(self) -> None:
         self.dismiss([t for t in self._tracks if t.id in self._selected])
@@ -286,10 +306,12 @@ class _SourceListScreen(_ListScreen):
         n = sum(1 for s in self._all_items if s.id in self.app._selection)
         self.query_one("#status", Static).update(
             f"{n} selected  ·  Space=select all  ·  Enter=browse  ·  D=download  ·  /=search"
+            f"   ·   ⤓ {_short(self.app._output_dir)}"
         )
 
     def action_toggle_item(self) -> None:
-        row = self.query_one("#main-table", DataTable).cursor_row
+        table = self.query_one("#main-table", DataTable)
+        row = table.cursor_row
         if row is None or row >= len(self._filtered):
             return
         source = self._filtered[row]
@@ -297,8 +319,11 @@ class _SourceListScreen(_ListScreen):
             del self.app._selection[source.id]
         else:
             self.app._selection[source.id] = None
-        self._refresh()
-        self.query_one("#main-table", DataTable).move_cursor(row=row)
+        # Update just this row's check + label cells — preserves scroll position
+        check, _, _, label = self._row_values(source)
+        table.update_cell_at(Coordinate(row, 0), check)
+        table.update_cell_at(Coordinate(row, 3), label)
+        self._update_status()
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         table = self.query_one("#main-table", DataTable)
@@ -356,7 +381,7 @@ class CategoryScreen(Screen):
         yield Header(show_clock=False)
         yield Static("", id="bg")
         yield DataTable(id="main-table", cursor_type="row")
-        yield Static("↑↓ navigate  ·  Enter drill in  ·  D download  ·  Esc quit", id="status")
+        yield Static("", id="status")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -365,6 +390,10 @@ class CategoryScreen(Screen):
         for cat in _CATEGORIES:
             table.add_row(cat.name, cat.description, key=cat.id)
         table.focus()
+        self.query_one("#status", Static).update(
+            "↑↓ navigate  ·  Enter drill in  ·  D download  ·  Esc quit"
+            f"   ·   ⤓ {_short(self.app._output_dir)}"
+        )
         self.set_interval(0.5, self._refresh_bg)
 
     def _refresh_bg(self) -> None:
@@ -473,6 +502,7 @@ class ArtistsScreen(_ListScreen):
     def _update_status(self) -> None:
         self.query_one("#status", Static).update(
             "Enter=browse albums  ·  D=download  ·  /=search  ·  Esc=back"
+            f"   ·   ⤓ {_short(self.app._output_dir)}"
         )
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:

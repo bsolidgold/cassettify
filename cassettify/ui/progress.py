@@ -132,6 +132,7 @@ class DownloadScreen(Screen):
     }
     #queue-text { color: $text-muted; }
     #done-text { color: $success; }
+    #outdir { dock: bottom; height: 1; color: $text-muted; padding: 0 2; }
     """
 
     BINDINGS = [
@@ -155,9 +156,12 @@ class DownloadScreen(Screen):
             ),
             id="panels",
         )
+        yield Static("", id="outdir")
         yield Footer()
 
     def on_mount(self) -> None:
+        from cassettify.ui.picker import _short
+        self.query_one("#outdir", Static).update(f"⤓ Saving to: {_short(self.app._output_dir)}")
         self.set_interval(0.12, self._tick)
 
     def _tick(self) -> None:
