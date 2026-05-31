@@ -44,16 +44,19 @@ def get_tracks(sp: spotipy.Spotify, playlist_id: str) -> list[Track]:
     while results:
         for item in results["items"]:
             t = item.get("track")
-            if not t or t.get("is_local"):
+            if not t or t.get("is_local") or not t.get("id"):
+                continue
+            spotify_url = t.get("external_urls", {}).get("spotify", "")
+            if not spotify_url:
                 continue
             art = t["album"]["images"][0]["url"] if t["album"]["images"] else None
             tracks.append(Track(
                 id=t["id"],
                 name=t["name"],
-                artist=t["artists"][0]["name"],
+                artist=t["artists"][0]["name"] if t.get("artists") else "Unknown Artist",
                 album=t["album"]["name"],
                 album_art_url=art,
-                spotify_url=t["external_urls"]["spotify"],
+                spotify_url=spotify_url,
             ))
         results = sp.next(results) if results["next"] else None
     return tracks

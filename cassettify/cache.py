@@ -12,10 +12,13 @@ def load() -> set[str]:
 
 
 def add(track_id: str) -> None:
+    import os
     ids = load()
     ids.add(track_id)
     CACHE_FILE.parent.mkdir(exist_ok=True)
-    CACHE_FILE.write_text(json.dumps(sorted(ids), indent=2))
+    tmp = CACHE_FILE.with_suffix(".tmp")
+    tmp.write_text(json.dumps(sorted(ids), indent=2))
+    os.replace(tmp, CACHE_FILE)
 
 
 def contains(track_id: str) -> bool:

@@ -1,4 +1,5 @@
 from __future__ import annotations
+import stat
 import spotipy
 from spotipy.oauth2 import SpotifyOAuth
 from cassettify.config import Config, CONFIG_DIR
@@ -16,4 +17,13 @@ def get_client(config: Config) -> spotipy.Spotify:
         cache_path=_CACHE_PATH,
         open_browser=True,
     )
-    return spotipy.Spotify(auth_manager=auth_manager)
+    client = spotipy.Spotify(auth_manager=auth_manager)
+    _secure_cache_file()
+    return client
+
+
+def _secure_cache_file() -> None:
+    from pathlib import Path
+    cache = Path(_CACHE_PATH)
+    if cache.exists():
+        cache.chmod(stat.S_IRUSR | stat.S_IWUSR)  # 0o600
