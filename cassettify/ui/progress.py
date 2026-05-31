@@ -1,4 +1,5 @@
 from __future__ import annotations
+import re
 import time
 from typing import Callable
 from textual.app import App, ComposeResult
@@ -7,6 +8,40 @@ from textual.containers import Horizontal, Vertical, ScrollableContainer
 from textual import work
 from cassettify.spotify import Track
 from cassettify.downloader import download_track as _dl
+
+# ── Status interpretation ─────────────────────────────────────────────────────
+
+_PCT = re.compile(r"(\d{1,3}(?:\.\d)?)%")
+
+
+def _interpret(line: str) -> str | None:
+    """Map raw spotdl/yt-dlp output to a clean, human phase. None = ignore."""
+    low = line.lower()
+    if "[download]" in low:
+        m = _PCT.search(line)
+        if m:
+            return f"Downloading…  {int(float(m.group(1)))}%"
+        return "Downloading…"
+    if "processing query" in low:
+        return "Looking up track…"
+    if "searching" in low:
+        return "Searching YouTube Music…"
+    if "downloading song" in low or ("downloading" in low and "using" in low):
+        return "Downloading audio…"
+    if "fetching lyrics" in low or "found lyrics" in low:
+        return "Fetching lyrics…"
+    if "converting" in low or "ffmpeg" in low:
+        return "Converting to MP3…"
+    if "applied metadata" in low or "embedding" in low:
+        return "Tagging & embedding art…"
+    if "skipping" in low or "already has metadata" in low or "already exists" in low:
+        return "Already downloaded — skipping"
+    if "could not find a match" in low or "could not find metadata" in low:
+        return "No match found"
+    if "error downloading" in low or "failure downloading" in low or "blocked" in low:
+        return "Hit a snag — retrying…"
+    return None
+
 
 # ── Cassette art ──────────────────────────────────────────────────────────────
 
@@ -161,8 +196,9 @@ class ProgressApp(App):
             self.app.call_from_thread(self._remove_from_queue, track)
 
             def on_status(line: str) -> None:
-                if line:
-                    self._cur_status = line[:58]
+                phase = _interpret(line)
+                if phase:
+                    self._cur_status = phase
 
             success = _dl(track, self._output_dir, on_status)
 
