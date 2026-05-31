@@ -22,6 +22,29 @@ def _ensure_config() -> Config:
     return config
 
 
+def _set_output(path: Path) -> None:
+    from cassettify import library
+    config = Config.load()
+    if config is None:
+        typer.echo("No config yet — run 'cassettify' once to set up first.", err=True)
+        raise typer.Exit(code=1)
+    old = config.output_dir
+    new = str(path.expanduser())
+    if old == new:
+        typer.echo(f"Output directory is already {new}.")
+        return
+    typer.echo(f"Current: {old}")
+    typer.echo(f"New:     {new}")
+    config.output_dir = new
+    config.save()
+    typer.echo("✓ Default updated.")
+
+    n = library.count_tracks(old)
+    if n and typer.confirm(f"Move {n} existing track(s) from the old folder to the new one?"):
+        moved, skipped = library.move_library(old, new)
+        typer.echo(f"✓ Moved {moved} file(s)" + (f", skipped {skipped} already present" if skipped else ""))
+
+
 def _grab_cookies(browser: Optional[str]) -> None:
     from cassettify import cookies as ck
     typer.echo("Grabbing YouTube cookies (your browser or keychain may ask for permission)...")
@@ -65,12 +88,21 @@ def main(
         None, "--cookies",
         help="Grab YouTube cookies from a browser (chrome/safari/firefox/edge/brave/... or 'auto') and exit",
     ),
+    set_output: Optional[Path] = typer.Option(
+        None, "--set-output",
+        help="Change where music is saved (offers to move your existing library) and exit",
+    ),
 ) -> None:
     if ctx.invoked_subcommand is not None:
         return
 
+    if set_output is not None:
+        _set_output(set_output)
+        return
+
     if setup:
-        run_wizard()
+        config = Config.load()
+        run_wizard(config)
         return
 
     if cookies is not None:

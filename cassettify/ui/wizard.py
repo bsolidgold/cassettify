@@ -3,9 +3,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from textual.app import App, ComposeResult
 from textual.screen import Screen
-from textual.widgets import Static, Input, Button, Label
+from textual.widgets import Static, Input, Button, Label, Checkbox
 from textual.containers import Container
 from textual import on
+from cassettify.library import count_tracks
 
 
 @dataclass
@@ -13,6 +14,7 @@ class WizardResult:
     client_id: str
     client_secret: str
     output_dir: str
+    move_existing: bool = False
 
 
 class WelcomeScreen(Screen):
@@ -80,20 +82,32 @@ class OutputDirScreen(Screen):
     _default = str(Path.home() / "Music" / "Cassettify")
 
     def compose(self) -> ComposeResult:
-        yield Container(
+        existing = self.app.existing_dir
+        start = existing or self._default
+        n = count_tracks(existing) if existing else 0
+        widgets = [
             Static("[bold]Where should songs be saved?[/bold]\n"),
-            Input(value=self._default, id="output_dir"),
-            Button("Finish setup →", id="next", variant="primary"),
-            classes="card",
-        )
+            Input(value=start, id="output_dir"),
+        ]
+        if n > 0:
+            widgets.append(
+                Checkbox(f"Move my existing {n} track(s) to the new location", id="move")
+            )
+        widgets.append(Button("Finish setup →", id="next", variant="primary"))
+        yield Container(*widgets, classes="card")
 
     @on(Button.Pressed, "#next")
     def submit(self) -> None:
         output_dir = self.query_one("#output_dir", Input).value.strip() or self._default
+        try:
+            move = self.query_one("#move", Checkbox).value
+        except Exception:
+            move = False
         self.app.exit(WizardResult(
             client_id=self.app.wizard_client_id,
             client_secret=self.app.wizard_client_secret,
             output_dir=output_dir,
+            move_existing=move,
         ))
 
 
@@ -116,6 +130,10 @@ class WizardApp(App):
 
     wizard_client_id: str = ""
     wizard_client_secret: str = ""
+
+    def __init__(self, existing_dir: str | None = None) -> None:
+        super().__init__()
+        self.existing_dir = existing_dir
 
     def on_mount(self) -> None:
         self.push_screen(WelcomeScreen())
