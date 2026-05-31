@@ -119,6 +119,7 @@ class ProgressApp(App):
     .done-item  { color: $success; }
     .fail-item  { color: $error; }
     .queue-item { color: $text-muted; }
+    .downloading-item { color: $warning; text-style: bold; }
     """
 
     def __init__(
@@ -149,14 +150,14 @@ class ProgressApp(App):
         )
         yield Horizontal(
             Vertical(
-                Static("✓  Done", classes="panel-title"),
-                ScrollableContainer(id="done-list"),
-                id="done-panel",
-            ),
-            Vertical(
                 Static(f"Queue  ({len(self._tracks)} tracks)", classes="panel-title", id="queue-title"),
                 ScrollableContainer(id="queue-list"),
                 id="queue-panel",
+            ),
+            Vertical(
+                Static("✓  Done", classes="panel-title"),
+                ScrollableContainer(id="done-list"),
+                id="done-panel",
             ),
             id="panels",
         )
@@ -193,7 +194,7 @@ class ProgressApp(App):
             self._spinning   = True
             self._track_start = time.monotonic()
 
-            self.app.call_from_thread(self._remove_from_queue, track)
+            self.app.call_from_thread(self._mark_downloading, track)
 
             def on_status(line: str) -> None:
                 phase = _interpret(line)
@@ -206,7 +207,7 @@ class ProgressApp(App):
                 self._on_success(track)
 
             self._done += 1
-            self.app.call_from_thread(self._add_to_done, track, success)
+            self.app.call_from_thread(self._finish_track, track, success)
 
         self._finished   = True
         self._spinning   = False
@@ -215,15 +216,24 @@ class ProgressApp(App):
         self._cur_album  = ""
         self._cur_status = "Press Q to quit"
 
-    def _remove_from_queue(self, track: Track) -> None:
-        remaining = len(self._tracks) - self._done - 1
+    def _mark_downloading(self, track: Track) -> None:
+        # Keep the track in the queue, flag it as the one in progress
+        try:
+            lbl = self.query_one(f"#q-{track.id}", Label)
+            lbl.update(f"▶  {track.artist} — {track.name}")
+            lbl.add_class("downloading-item")
+        except Exception:
+            pass
+        remaining = len(self._tracks) - self._done
         self.query_one("#queue-title", Static).update(f"Queue  ({remaining} remaining)")
+
+    def _finish_track(self, track: Track, success: bool) -> None:
         try:
             self.query_one(f"#q-{track.id}").remove()
         except Exception:
             pass
-
-    def _add_to_done(self, track: Track, success: bool) -> None:
+        remaining = len(self._tracks) - self._done
+        self.query_one("#queue-title", Static).update(f"Queue  ({remaining} remaining)")
         self.query_one("#done-list").mount(
             Label(
                 f"✓  {track.name}" if success else f"✗  {track.name}",
