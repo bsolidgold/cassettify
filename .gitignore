@@ -11,3 +11,6 @@ music/
 # local handoff / scratch (untracked)
 HANDOFF.md
 .handoff/
+
+# claude/superpowers workflow artifacts (untracked)
+docs/superpowers/
