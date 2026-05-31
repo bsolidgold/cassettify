@@ -26,11 +26,8 @@ def run_wizard() -> Config:
 
 
 def run_picker(sp: spotipy.Spotify) -> list[Track]:
-    """Run the interactive source/track picker. Returns selected tracks."""
-    sources = get_all_sources(sp)
-    if not sources:
-        return []
-    result = PickerApp(sources, sp).run()
+    """Run the interactive picker. Returns selected tracks."""
+    result = PickerApp(sp).run()
     return result or []
 
 
