@@ -41,72 +41,65 @@ def _interpret(line: str) -> str | None:
 
 
 # ── Cassette art ──────────────────────────────────────────────────────────────
-# The original layout (label window flanked by two reels), scaled up. Height is
-# kept proportional to width (~2:1) because terminal cells are ~2x taller than
-# wide — otherwise it renders flat/VHS-like.
+# Modeled on a real compact cassette: the printed label fills the whole face
+# (side badge, title, underline, artist/album up top), and the two small reels
+# sit close together in the center with the tape window between them. The iconic
+# bottom stripe doubles as the download progress bar.
 
-_INNER = 70   # content width between the box walls
-_LBL = 30     # label window inner width
-_BAR = 32     # progress bar segments
-_OUT = " " * 6  # outer margin (pulls reels in toward the center)
-_GAP = " "      # gap between reel and label window
-
-# Rotating reel spokes — 7 wide, 3 tall, narrow glyphs only (no wide unicode)
-_SPOKES = [
-    ["   │   ", "───┼───", "   │   "],
-    [" ╲   ╱ ", "  ╲┼╱  ", " ╱   ╲ "],
-    ["   │   ", "───┼───", "   │   "],
-    [" ╱   ╲ ", "  ╱┼╲  ", " ╲   ╱ "],
-]
+_INNER = 64           # content width between the outer shell walls
+_LC = _INNER - 6      # label inner width
+_HUB = ["│", "╲", "─", "╱"]   # rotating reel hub
+_TAPE = ["┌──────┐", "│▓▓░░▓▓│", "└──────┘"]  # tape window between the reels
 
 
 def _fit(s: str, w: int) -> str:
     return (s[:w - 1] + "…") if len(s) > w else s.ljust(w)
 
 
+def _center(s: str, w: int) -> str:
+    s = s[:w]
+    pad = w - len(s)
+    left = pad // 2
+    return " " * left + s + " " * (pad - left)
+
+
 def _reel(frame: int) -> list[str]:
-    sp = _SPOKES[frame]
-    reel = ["╭─────────╮"] + [f"│ {r} │" for r in sp] + ["╰─────────╯"]  # 5 rows, 11 wide
-    return [" " * 11] + reel + [" " * 11]  # pad to 7 rows, vertically centered vs the label
+    return ["╭───╮", f"│ {_HUB[frame]} │", "╰───╯"]
 
 
 def _cassette(name, artist, album, done, total, status, tick, spinning) -> str:
-    frame = tick % 4 if spinning else 0
+    frame = tick % 4 if spinning else 2
     lr = _reel(frame)
     rr = _reel((frame + 2) % 4)
-    n, a, b = _fit(name, _LBL), _fit(artist, _LBL), _fit(album, _LBL)
-    filled = int(done / max(total, 1) * _BAR)
-    bar = "▓" * filled + "░" * (_BAR - filled)
+    bar_w = _LC - 12
+    filled = int(done / max(total, 1) * bar_w)
+    bar = "▓" * filled + "░" * (bar_w - filled)
     pct = f"{int(done / max(total, 1) * 100)}%".rjust(4)
-    hdr = _fit("  C A S S E T T I F Y            S I D E  A", _INNER - 8)
+    band = [lr[i] + "  " + _TAPE[i] + "  " + rr[i] for i in range(3)]
+    meta = artist + ("  ·  " + album if album else "")
 
-    def row(c: str) -> str:
+    def shell(c: str) -> str:
         return f"  ║{c[:_INNER].ljust(_INNER)}║"
 
-    label = [
-        "╔" + "═" * (_LBL + 2) + "╗",
-        "║ " + " " * _LBL + " ║",
-        "║ " + n + " ║",
-        "║ " + " " * _LBL + " ║",
-        "║ " + a + " ║",
-        "║ " + " " * _LBL + " ║",
-        "║ " + b + " ║",
-    ]
+    def label(inner: str) -> str:
+        return shell("   │" + _fit(inner, _LC - 2) + "│   ")
+
+    screws = shell(" o" + " " * (_INNER - 4) + "o ")
     lines = [
         "  ╔" + "═" * _INNER + "╗",
-        row(""),
-        row("  ┌" + "─" * (_INNER - 8) + "┐"),
-        row("  │" + hdr + "│"),
-        row("  └" + "─" * (_INNER - 8) + "┘"),
-        row(""),
-    ]
-    for i in range(7):
-        lines.append(row(_OUT + lr[i] + _GAP + label[i] + _GAP + rr[i] + _OUT))
-    lines += [
-        row(""),
-        row(f"  track {done} of {total}   {bar}  {pct}"),
-        row("  " + _fit(status or "", _INNER - 4)),
-        row(""),
+        screws,
+        shell("   ┌" + "─" * (_LC - 2) + "┐   "),
+        label(" [A]"),
+        label("  " + name),
+        label("  " + "─" * (_LC - 6)),
+        label("  " + meta),
+        label(""),
+        *[label(_center(b, _LC - 2)) for b in band],
+        label(""),
+        label("  " + _fit(status or "", _LC - 22) + f"   track {done}/{total}"),
+        label("  " + bar + "  " + pct),
+        shell("   └" + "─" * (_LC - 2) + "┘   "),
+        screws,
         "  ╚" + "═" * _INNER + "╝",
     ]
     return "\n".join(lines)
@@ -118,7 +111,7 @@ class DownloadScreen(Screen):
 
     CSS = """
     #cassette {
-        height: 18;
+        height: 17;
         width: 100%;
         content-align: center middle;
         color: $primary;
