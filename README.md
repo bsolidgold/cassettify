@@ -16,15 +16,23 @@ with full ID3 tags and embedded album art.
 
 ## Install
 
+The recommended way is with [pipx](https://pipx.pypa.io), which installs Cassettify in its own isolated environment and puts a global `cassettify` command on your PATH:
+
 ```bash
-pip install cassettify
+pipx install cassettify
 ```
 
-Or via Homebrew:
+Don't have pipx?
 
 ```bash
-brew tap bsolidgold/cassettify
-brew install cassettify
+brew install pipx                     # macOS
+# or:  python3 -m pip install --user pipx && python3 -m pipx ensurepath
+```
+
+Or just use plain pip (into the current environment):
+
+```bash
+pip install cassettify
 ```
 
 ---
