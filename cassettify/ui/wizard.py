@@ -39,7 +39,7 @@ class InstructionsScreen(Screen):
             Static(
                 "1. Go to developer.spotify.com/dashboard\n"
                 "2. Log in and click [bold]Create app[/bold]\n"
-                "3. Set Redirect URI to: [bold]http://localhost:8888/callback[/bold]\n"
+                "3. Set Redirect URI to: [bold]https://bsolidgold.github.io/cassettify/callback/[/bold]\n"
                 "4. Copy your [bold]Client ID[/bold] and [bold]Client Secret[/bold]"
             ),
             Button("I've got my credentials →", id="next", variant="primary"),

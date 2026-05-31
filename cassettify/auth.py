@@ -12,7 +12,7 @@ def get_client(config: Config) -> spotipy.Spotify:
     auth_manager = SpotifyOAuth(
         client_id=config.client_id,
         client_secret=config.client_secret,
-        redirect_uri="http://localhost:8888/callback",
+        redirect_uri="https://bsolidgold.github.io/cassettify/callback/",
         scope=SCOPE,
         cache_path=_CACHE_PATH,
         open_browser=True,
