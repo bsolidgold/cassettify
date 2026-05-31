@@ -1,8 +1,7 @@
 from __future__ import annotations
 import spotipy
 from cassettify.config import Config
-from cassettify.auth import get_client
-from cassettify.spotify import get_playlists, get_tracks, Playlist
+from cassettify.spotify import get_all_sources, get_tracks_for_source, Track, Playlist
 from cassettify import cache
 from cassettify.downloader import download_track
 from cassettify.ui.wizard import WizardApp
@@ -26,25 +25,19 @@ def run_wizard() -> Config:
     return config
 
 
-def run_picker(sp: spotipy.Spotify) -> list[Playlist]:
-    """Run the interactive playlist picker. Returns selected playlists."""
-    playlists = get_playlists(sp)
-    if not playlists:
+def run_picker(sp: spotipy.Spotify) -> list[Track]:
+    """Run the interactive source/track picker. Returns selected tracks."""
+    sources = get_all_sources(sp)
+    if not sources:
         return []
-    return PickerApp(playlists).run() or []
+    result = PickerApp(sources, sp).run()
+    return result or []
 
 
-def run_downloads(
-    sp: spotipy.Spotify, playlists: list[Playlist], output_dir: str
-) -> None:
-    """Collect tracks from playlists, skip cached, run the progress UI."""
-    all_tracks = []
-    for playlist in playlists:
-        tracks = get_tracks(sp, playlist.id)
-        new = [t for t in tracks if not cache.contains(t.id)]
-        all_tracks.extend(new)
-
-    if not all_tracks:
+def run_downloads(tracks: list[Track], output_dir: str) -> None:
+    """Filter cached tracks then run the progress UI."""
+    new_tracks = [t for t in tracks if not cache.contains(t.id)]
+    if not new_tracks:
         print("Nothing new to download — all tracks already in cache.")
         return
 
@@ -54,4 +47,4 @@ def run_downloads(
             cache.add(track.id)
         return success
 
-    ProgressApp(all_tracks, download_and_cache).run()
+    ProgressApp(new_tracks, download_and_cache).run()

@@ -18,7 +18,7 @@ from cryptography.x509.oid import NameOID
 
 from cassettify.config import Config, CONFIG_DIR
 
-SCOPE = "playlist-read-private playlist-read-collaborative"
+SCOPE = "playlist-read-private playlist-read-collaborative user-library-read"
 _CACHE_PATH = str(CONFIG_DIR / ".spotify_cache")
 _REDIRECT_URI = "https://127.0.0.1:8888/callback"
 _PORT = 8888
