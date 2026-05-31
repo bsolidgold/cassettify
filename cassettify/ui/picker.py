@@ -8,7 +8,7 @@ from textual import on, work
 from cassettify.spotify import (
     Playlist, Track, Artist,
     LIKED_SONGS_ID, get_tracks_for_source,
-    get_playlists, get_all_sources, get_followed_artists, get_artist_albums,
+    get_playlists, get_followed_artists, get_artist_albums,
 )
 import spotipy
 
@@ -40,10 +40,18 @@ class TrackScreen(Screen):
         ("escape", "confirm", "Done"),
     ]
 
-    def __init__(self, source: Playlist, sp: spotipy.Spotify) -> None:
+    def __init__(
+        self,
+        source: Playlist,
+        sp: spotipy.Spotify,
+        preselected: set[str] | None = None,
+        select_all: bool = False,
+    ) -> None:
         super().__init__()
         self._source = source
         self._sp = sp
+        self._preselected = preselected or set()
+        self._select_all = select_all
         self._tracks: list[Track] = []
         self._selected: set[str] = set()
 
@@ -66,7 +74,12 @@ class TrackScreen(Screen):
 
     def _on_loaded(self, tracks: list[Track]) -> None:
         self._tracks = tracks
-        self._selected = set()
+        ids = {t.id for t in tracks}
+        if self._select_all:
+            self._selected = set(ids)
+        else:
+            # Restore any previously-picked tracks that still exist in this source
+            self._selected = self._preselected & ids
         self.query_one("#loader").remove_class("visible")
         self._refresh()
         self.query_one("#main-table", DataTable).focus()
@@ -107,7 +120,7 @@ class TrackScreen(Screen):
 # ── Generic lazy-loading list screen ─────────────────────────────────────────
 
 class _ListScreen(Screen):
-    """Base for screens that load a list, support Space=select-all and Enter=drill."""
+    """Base for screens that load a list and support search."""
 
     CSS = _CSS
 
@@ -133,6 +146,11 @@ class _ListScreen(Screen):
         self._setup_columns(self.query_one("#main-table", DataTable))
         self._load_items()
 
+    def on_screen_resume(self) -> None:
+        # Reflect any selection changes made elsewhere (e.g. after a download commit)
+        if self._all_items:
+            self._refresh()
+
     def _setup_columns(self, table: DataTable) -> None:
         raise NotImplementedError
 
@@ -147,9 +165,12 @@ class _ListScreen(Screen):
 
     def _refresh(self) -> None:
         table = self.query_one("#main-table", DataTable)
+        row = table.cursor_row
         table.clear()
         for item in self._filtered:
             table.add_row(*self._row_values(item), key=self._item_key(item))
+        if row is not None and self._filtered:
+            table.move_cursor(row=min(row, len(self._filtered) - 1))
         self._update_status()
 
     def _update_status(self) -> None:
@@ -192,6 +213,99 @@ class _ListScreen(Screen):
                 event.stop()
 
 
+# ── Shared base for selectable source lists (playlists / albums) ──────────────
+
+class _SourceListScreen(_ListScreen):
+    """A list of selectable sources. Space = select whole source, Enter = pick tracks."""
+
+    COLUMNS = ("", "Source", "Tracks", "Selected")
+
+    def __init__(self, sp: spotipy.Spotify) -> None:
+        super().__init__()
+        self._sp = sp
+
+    def _setup_columns(self, table: DataTable) -> None:
+        table.add_columns(*self.COLUMNS)
+
+    def _load_items(self) -> None:
+        self._load_async()
+
+    @work(thread=True)
+    def _load_async(self) -> None:
+        items = self._fetch()
+        self.app.call_from_thread(self._on_loaded, items)
+
+    def _fetch(self) -> list[Playlist]:
+        raise NotImplementedError
+
+    def _on_loaded(self, items: list[Playlist]) -> None:
+        self._all_items = items
+        self._filtered = list(items)
+        for it in items:
+            self.app._source_registry[it.id] = it
+        self._refresh()
+        self.query_one("#main-table", DataTable).focus()
+
+    def _row_values(self, item: Playlist) -> tuple:
+        if item.id not in self.app._selection:
+            return " ", item.name, str(item.track_count), ""
+        sel = self.app._selection[item.id]
+        label = "all" if sel is None else f"{len(sel)} tracks"
+        return "✓", item.name, str(item.track_count), label
+
+    def _item_key(self, item: Playlist) -> str:
+        return item.id
+
+    def _search_key(self, item: Playlist) -> str:
+        return item.name
+
+    def _update_status(self) -> None:
+        n = sum(1 for s in self._all_items if s.id in self.app._selection)
+        self.query_one("#status", Static).update(
+            f"{n} selected  ·  Space=select all  ·  Enter=browse  ·  D=download  ·  /=search"
+        )
+
+    def action_toggle_item(self) -> None:
+        row = self.query_one("#main-table", DataTable).cursor_row
+        if row is None or row >= len(self._filtered):
+            return
+        source = self._filtered[row]
+        if source.id in self.app._selection:
+            del self.app._selection[source.id]
+        else:
+            self.app._selection[source.id] = None
+        self._refresh()
+        self.query_one("#main-table", DataTable).move_cursor(row=row)
+
+    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+        table = self.query_one("#main-table", DataTable)
+        row = table.cursor_row
+        if row is None or row >= len(self._filtered):
+            return
+        source = self._filtered[row]
+
+        # Restore prior selection state for this source
+        if source.id in self.app._selection:
+            val = self.app._selection[source.id]
+            if val is None:
+                screen = TrackScreen(source, self._sp, select_all=True)
+            else:
+                screen = TrackScreen(source, self._sp, preselected={t.id for t in val})
+        else:
+            screen = TrackScreen(source, self._sp)
+
+        def handle(tracks: list[Track]) -> None:
+            if tracks:
+                self.app._selection[source.id] = tracks
+            elif source.id in self.app._selection:
+                del self.app._selection[source.id]
+            self._refresh()
+            table.focus()
+            table.move_cursor(row=row)
+
+        self.app.push_screen(screen, handle)
+
+
 # ── Category screen ───────────────────────────────────────────────────────────
 
 @dataclass
@@ -202,10 +316,10 @@ class _Category:
 
 
 _CATEGORIES = [
-    _Category("liked",   "♥  Liked Songs",      "Your saved tracks"),
-    _Category("playlists", "◈  Playlists",       "Your Spotify playlists"),
-    _Category("albums",  "▣  Saved Albums",      "Albums you've saved"),
-    _Category("artists", "♪  Followed Artists",  "Artists you follow"),
+    _Category("liked",     "♥  Liked Songs",      "Your saved tracks"),
+    _Category("playlists", "◈  Playlists",         "Your Spotify playlists"),
+    _Category("albums",    "▣  Saved Albums",      "Albums you've saved"),
+    _Category("artists",   "♪  Followed Artists",  "Artists you follow"),
 ]
 
 
@@ -235,11 +349,13 @@ class CategoryScreen(Screen):
         cat = _CATEGORIES[row]
         sp = self.app._sp
         if cat.id == "liked":
-            liked_source = Playlist(
+            liked = Playlist(
                 id=LIKED_SONGS_ID, name="♥  Liked Songs",
                 track_count=0, cover_url=None, source_type="liked",
             )
-            self.app.push_screen(TrackScreen(liked_source, sp), self.app._handle_tracks)
+            prior = self.app._selection.get(LIKED_SONGS_ID)
+            pre = {t.id for t in prior} if prior else set()
+            self.app.push_screen(TrackScreen(liked, sp, preselected=pre), self.app._handle_liked)
         elif cat.id == "playlists":
             self.app.push_screen(PlaylistsScreen(sp))
         elif cat.id == "albums":
@@ -251,97 +367,19 @@ class CategoryScreen(Screen):
         self.app.exit(None)
 
 
-# ── Playlists screen ──────────────────────────────────────────────────────────
+# ── Concrete source lists ─────────────────────────────────────────────────────
 
-class PlaylistsScreen(_ListScreen):
+class PlaylistsScreen(_SourceListScreen):
+    COLUMNS = ("", "Playlist", "Tracks", "Selected")
 
-    def __init__(self, sp: spotipy.Spotify) -> None:
-        super().__init__()
-        self._sp = sp
-
-    def _setup_columns(self, table: DataTable) -> None:
-        table.add_columns("", "Playlist", "Tracks", "Selected")
-
-    def _load_items(self) -> None:
-        self._load_async()
-
-    @work(thread=True)
-    def _load_async(self) -> None:
-        items = get_playlists(self._sp)
-        self.app.call_from_thread(self._on_loaded, items)
-
-    def _on_loaded(self, items: list[Playlist]) -> None:
-        self._all_items = items
-        self._filtered = list(items)
-        self._refresh()
-        self.query_one("#main-table", DataTable).focus()
-
-    def _row_values(self, item: Playlist) -> tuple:
-        if item.id not in self.app._selection:
-            return " ", item.name, str(item.track_count), ""
-        sel = self.app._selection[item.id]
-        label = "all" if sel is None else f"{len(sel)} tracks"
-        return "✓", item.name, str(item.track_count), label
-
-    def _item_key(self, item: Playlist) -> str:
-        return item.id
-
-    def _search_key(self, item: Playlist) -> str:
-        return item.name
-
-    def _update_status(self) -> None:
-        n = sum(1 for s in self._all_items if s.id in self.app._selection)
-        self.query_one("#status", Static).update(
-            f"{n} selected  ·  Space=select all  ·  Enter=browse  ·  D=download  ·  /=search"
-        )
-
-    def action_toggle_item(self) -> None:
-        row = self.query_one("#main-table", DataTable).cursor_row
-        if row is None or row >= len(self._filtered):
-            return
-        source = self._filtered[row]
-        if source.id in self.app._selection:
-            del self.app._selection[source.id]
-        else:
-            self.app._selection[source.id] = None
-        self._refresh()
-        self.query_one("#main-table", DataTable).move_cursor(row=row)
-
-    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
-        table = self.query_one("#main-table", DataTable)
-        row = table.cursor_row
-        if row is None or row >= len(self._filtered):
-            return
-        source = self._filtered[row]
-
-        def handle(tracks: list[Track]) -> None:
-            if tracks:
-                self.app._selection[source.id] = tracks
-            elif source.id in self.app._selection:
-                del self.app._selection[source.id]
-            self._refresh()
-            table.focus()
-            table.move_cursor(row=row)
-
-        self.app.push_screen(TrackScreen(source, self._sp), handle)
+    def _fetch(self) -> list[Playlist]:
+        return get_playlists(self._sp)
 
 
-# ── Saved albums screen ───────────────────────────────────────────────────────
+class SavedAlbumsScreen(_SourceListScreen):
+    COLUMNS = ("", "Album", "Tracks", "Selected")
 
-class SavedAlbumsScreen(_ListScreen):
-
-    def __init__(self, sp: spotipy.Spotify) -> None:
-        super().__init__()
-        self._sp = sp
-
-    def _setup_columns(self, table: DataTable) -> None:
-        table.add_columns("", "Album", "Tracks", "Selected")
-
-    def _load_items(self) -> None:
-        self._load_async()
-
-    @work(thread=True)
-    def _load_async(self) -> None:
+    def _fetch(self) -> list[Playlist]:
         results = self._sp.current_user_saved_albums(limit=50)
         albums = []
         while results:
@@ -353,65 +391,21 @@ class SavedAlbumsScreen(_ListScreen):
                     track_count=a["total_tracks"], cover_url=cover, source_type="album",
                 ))
             results = self._sp.next(results) if results["next"] else None
-        self.app.call_from_thread(self._on_loaded, albums)
-
-    def _on_loaded(self, items: list[Playlist]) -> None:
-        self._all_items = items
-        self._filtered = list(items)
-        self._refresh()
-        self.query_one("#main-table", DataTable).focus()
-
-    def _row_values(self, item: Playlist) -> tuple:
-        if item.id not in self.app._selection:
-            return " ", item.name, str(item.track_count), ""
-        sel = self.app._selection[item.id]
-        label = "all" if sel is None else f"{len(sel)} tracks"
-        return "✓", item.name, str(item.track_count), label
-
-    def _item_key(self, item: Playlist) -> str:
-        return item.id
-
-    def _search_key(self, item: Playlist) -> str:
-        return item.name
-
-    def _update_status(self) -> None:
-        n = sum(1 for s in self._all_items if s.id in self.app._selection)
-        self.query_one("#status", Static).update(
-            f"{n} selected  ·  Space=select all  ·  Enter=browse  ·  D=download  ·  /=search"
-        )
-
-    def action_toggle_item(self) -> None:
-        row = self.query_one("#main-table", DataTable).cursor_row
-        if row is None or row >= len(self._filtered):
-            return
-        source = self._filtered[row]
-        if source.id in self.app._selection:
-            del self.app._selection[source.id]
-        else:
-            self.app._selection[source.id] = None
-        self._refresh()
-        self.query_one("#main-table", DataTable).move_cursor(row=row)
-
-    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
-        table = self.query_one("#main-table", DataTable)
-        row = table.cursor_row
-        if row is None or row >= len(self._filtered):
-            return
-        source = self._filtered[row]
-
-        def handle(tracks: list[Track]) -> None:
-            if tracks:
-                self.app._selection[source.id] = tracks
-            elif source.id in self.app._selection:
-                del self.app._selection[source.id]
-            self._refresh()
-            table.focus()
-            table.move_cursor(row=row)
-
-        self.app.push_screen(TrackScreen(source, self._sp), handle)
+        return albums
 
 
-# ── Artists screen ────────────────────────────────────────────────────────────
+class ArtistAlbumsScreen(_SourceListScreen):
+    COLUMNS = ("", "Album", "Tracks", "Selected")
+
+    def __init__(self, artist: Artist, sp: spotipy.Spotify) -> None:
+        super().__init__(sp)
+        self._artist = artist
+
+    def _fetch(self) -> list[Playlist]:
+        return get_artist_albums(self._sp, self._artist.id)
+
+
+# ── Artists screen (navigation only, not selectable) ──────────────────────────
 
 class ArtistsScreen(_ListScreen):
 
@@ -454,84 +448,7 @@ class ArtistsScreen(_ListScreen):
         row = self.query_one("#main-table", DataTable).cursor_row
         if row is None or row >= len(self._filtered):
             return
-        artist = self._filtered[row]
-        self.app.push_screen(ArtistAlbumsScreen(artist, self._sp))
-
-
-# ── Artist albums screen ──────────────────────────────────────────────────────
-
-class ArtistAlbumsScreen(_ListScreen):
-
-    def __init__(self, artist: Artist, sp: spotipy.Spotify) -> None:
-        super().__init__()
-        self._artist = artist
-        self._sp = sp
-
-    def _setup_columns(self, table: DataTable) -> None:
-        table.add_columns("", "Album", "Tracks", "Selected")
-
-    def _load_items(self) -> None:
-        self._load_async()
-
-    @work(thread=True)
-    def _load_async(self) -> None:
-        albums = get_artist_albums(self._sp, self._artist.id)
-        self.app.call_from_thread(self._on_loaded, albums)
-
-    def _on_loaded(self, items: list[Playlist]) -> None:
-        self._all_items = items
-        self._filtered = list(items)
-        self._refresh()
-        self.query_one("#main-table", DataTable).focus()
-
-    def _row_values(self, item: Playlist) -> tuple:
-        if item.id not in self.app._selection:
-            return " ", item.name, str(item.track_count), ""
-        sel = self.app._selection[item.id]
-        label = "all" if sel is None else f"{len(sel)} tracks"
-        return "✓", item.name, str(item.track_count), label
-
-    def _item_key(self, item: Playlist) -> str:
-        return item.id
-
-    def _search_key(self, item: Playlist) -> str:
-        return item.name
-
-    def _update_status(self) -> None:
-        n = sum(1 for s in self._all_items if s.id in self.app._selection)
-        self.query_one("#status", Static).update(
-            f"{n} selected  ·  Space=select all  ·  Enter=browse  ·  D=download  ·  /=search"
-        )
-
-    def action_toggle_item(self) -> None:
-        row = self.query_one("#main-table", DataTable).cursor_row
-        if row is None or row >= len(self._filtered):
-            return
-        source = self._filtered[row]
-        if source.id in self.app._selection:
-            del self.app._selection[source.id]
-        else:
-            self.app._selection[source.id] = None
-        self._refresh()
-        self.query_one("#main-table", DataTable).move_cursor(row=row)
-
-    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
-        table = self.query_one("#main-table", DataTable)
-        row = table.cursor_row
-        if row is None or row >= len(self._filtered):
-            return
-        source = self._filtered[row]
-
-        def handle(tracks: list[Track]) -> None:
-            if tracks:
-                self.app._selection[source.id] = tracks
-            elif source.id in self.app._selection:
-                del self.app._selection[source.id]
-            self._refresh()
-            table.focus()
-            table.move_cursor(row=row)
-
-        self.app.push_screen(TrackScreen(source, self._sp), handle)
+        self.app.push_screen(ArtistAlbumsScreen(self._filtered[row], self._sp))
 
 
 # ── App ───────────────────────────────────────────────────────────────────────
@@ -546,33 +463,33 @@ class PickerApp(App):
         super().__init__()
         self._sp = sp
         self._selection: dict[str, list[Track] | None] = {}
-        self._source_cache: dict[str, Playlist] = {}
+        self._source_registry: dict[str, Playlist] = {}
 
     def on_mount(self) -> None:
         self.push_screen(CategoryScreen())
 
-    def _handle_tracks(self, tracks: list[Track]) -> None:
-        """Callback for liked-songs TrackScreen."""
+    def _handle_liked(self, tracks: list[Track]) -> None:
         if tracks:
             self._selection[LIKED_SONGS_ID] = tracks
         elif LIKED_SONGS_ID in self._selection:
             del self._selection[LIKED_SONGS_ID]
 
     def action_download(self) -> None:
-        needs_fetch = {
+        if not self._selection:
+            return
+        needs_fetch = [
             sid for sid, v in self._selection.items()
-            if v is None and sid not in self._source_cache
-        }
+            if v is None
+        ]
         if needs_fetch:
-            self._fetch_and_exit(list(needs_fetch))
+            self._fetch_and_exit(needs_fetch)
         else:
             self.exit(self._build_tracks())
 
     @work(thread=True)
     def _fetch_and_exit(self, source_ids: list[str]) -> None:
-        from cassettify.spotify import get_tracks_for_source
         for sid in source_ids:
-            source = self._source_cache.get(sid)
+            source = self._source_registry.get(sid)
             if source:
                 self._selection[sid] = get_tracks_for_source(self._sp, source)
         self.call_from_thread(lambda: self.exit(self._build_tracks()))
