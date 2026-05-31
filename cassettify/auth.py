@@ -1,0 +1,19 @@
+from __future__ import annotations
+import spotipy
+from spotipy.oauth2 import SpotifyOAuth
+from cassettify.config import Config, CONFIG_DIR
+
+SCOPE = "playlist-read-private playlist-read-collaborative"
+_CACHE_PATH = str(CONFIG_DIR / ".spotify_cache")
+
+
+def get_client(config: Config) -> spotipy.Spotify:
+    auth_manager = SpotifyOAuth(
+        client_id=config.client_id,
+        client_secret=config.client_secret,
+        redirect_uri="http://localhost:8888/callback",
+        scope=SCOPE,
+        cache_path=_CACHE_PATH,
+        open_browser=True,
+    )
+    return spotipy.Spotify(auth_manager=auth_manager)
