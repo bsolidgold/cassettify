@@ -7,3 +7,7 @@ build/
 *.egg-info/
 
 music/
+
+# local handoff / scratch (untracked)
+HANDOFF.md
+.handoff/
