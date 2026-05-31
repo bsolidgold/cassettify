@@ -55,7 +55,7 @@ class TrackScreen(Screen):
     @work(thread=True)
     def _load_tracks(self) -> None:
         tracks = get_tracks_for_source(self._sp, self._source)
-        self.call_from_thread(self._on_tracks_loaded, tracks)
+        self.app.call_from_thread(self._on_tracks_loaded, tracks)
 
     def _on_tracks_loaded(self, tracks: list[Track]) -> None:
         self._tracks = tracks
@@ -219,7 +219,7 @@ class SourceScreen(Screen):
         for sid in source_ids:
             if sid in source_map:
                 self._track_cache[sid] = get_tracks_for_source(self._sp, source_map[sid])
-        self.call_from_thread(lambda: self.app.exit(self._build_track_list()))
+        self.app.call_from_thread(lambda: self.app.exit(self._build_track_list()))
 
     def _build_track_list(self) -> list[Track]:
         tracks = []
