@@ -1,4 +1,5 @@
 from __future__ import annotations
+import time
 from dataclasses import dataclass
 from textual.app import App, ComposeResult
 from textual.screen import Screen
@@ -10,11 +11,15 @@ from cassettify.spotify import (
     LIKED_SONGS_ID, get_tracks_for_source,
     get_playlists, get_followed_artists, get_artist_albums,
 )
+from cassettify import cache
+from cassettify.downloader import download_track as _dl
+from cassettify.ui.progress import DownloadScreen, _interpret
 import spotipy
 
 # ── Shared CSS ────────────────────────────────────────────────────────────────
 
 _CSS = """
+Screen #bg { dock: top; height: 1; color: $warning; padding: 0 2; }
 Screen #search { dock: top; margin: 1 2; display: none; }
 Screen #search.visible { display: block; }
 Screen #main-table { margin: 0 2; }
@@ -147,6 +152,7 @@ class _ListScreen(Screen):
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=False)
+        yield Static("", id="bg")
         yield Input(placeholder="Search (Esc to close)...", id="search")
         yield DataTable(id="main-table", cursor_type="row")
         yield Static("", id="status")
@@ -155,6 +161,13 @@ class _ListScreen(Screen):
     def on_mount(self) -> None:
         self._setup_columns(self.query_one("#main-table", DataTable))
         self._load_items()
+        self.set_interval(0.5, self._refresh_bg)
+
+    def _refresh_bg(self) -> None:
+        try:
+            self.query_one("#bg", Static).update(self.app.bg_status())
+        except Exception:
+            pass
 
     def on_screen_resume(self) -> None:
         # Reflect any selection changes made elsewhere (e.g. after a download commit)
@@ -341,6 +354,7 @@ class CategoryScreen(Screen):
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=False)
+        yield Static("", id="bg")
         yield DataTable(id="main-table", cursor_type="row")
         yield Static("↑↓ navigate  ·  Enter drill in  ·  D download  ·  Esc quit", id="status")
         yield Footer()
@@ -351,6 +365,13 @@ class CategoryScreen(Screen):
         for cat in _CATEGORIES:
             table.add_row(cat.name, cat.description, key=cat.id)
         table.focus()
+        self.set_interval(0.5, self._refresh_bg)
+
+    def _refresh_bg(self) -> None:
+        try:
+            self.query_one("#bg", Static).update(self.app.bg_status())
+        except Exception:
+            pass
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         row = self.query_one("#main-table", DataTable).cursor_row
@@ -463,20 +484,61 @@ class ArtistsScreen(_ListScreen):
 
 # ── App ───────────────────────────────────────────────────────────────────────
 
-class PickerApp(App):
-    """Multi-level picker. Returns list[Track]."""
+class CassettifyApp(App):
+    """Unified app: browse library, queue tracks, download in the background."""
 
     TITLE = "cassettify"
     BINDINGS = [("d", "download", "Download")]
 
-    def __init__(self, sp: spotipy.Spotify) -> None:
+    def __init__(
+        self,
+        sp: spotipy.Spotify,
+        output_dir: str,
+        initial_tracks: list[Track] | None = None,
+    ) -> None:
         super().__init__()
         self._sp = sp
+        self._output_dir = output_dir
+        self._initial_tracks = initial_tracks or []
+        # Picker state
         self._selection: dict[str, list[Track] | None] = {}
         self._source_registry: dict[str, Playlist] = {}
+        # Download state (read by DownloadScreen + bg status bars)
+        self._queue: list[Track] = []
+        self._queued_ids: set[str] = set()
+        self._q_index = 0
+        self._done: list[tuple[Track, bool]] = []
+        self._cur_name = ""
+        self._cur_artist = ""
+        self._cur_album = ""
+        self._cur_status = ""
+        self._spinning = False
+        self._tick = 0
+        self._track_start = 0.0
+        self._worker_started = False
+        self._closing = False
+        self._cur_proc = None
 
     def on_mount(self) -> None:
         self.push_screen(CategoryScreen())
+        if self._initial_tracks:
+            for t in self._initial_tracks:
+                if t.id in self._queued_ids or cache.contains(t.id):
+                    continue
+                self._queued_ids.add(t.id)
+                self._queue.append(t)
+            self._ensure_worker()
+            self.push_screen(DownloadScreen())
+
+    def on_unmount(self) -> None:
+        self._closing = True
+        if self._cur_proc is not None:
+            try:
+                self._cur_proc.terminate()
+            except Exception:
+                pass
+
+    # ── Selection callbacks ──────────────────────────────────────────────────
 
     def _handle_liked(self, tracks: list[Track]) -> None:
         if tracks:
@@ -484,32 +546,77 @@ class PickerApp(App):
         elif LIKED_SONGS_ID in self._selection:
             del self._selection[LIKED_SONGS_ID]
 
+    # ── Download orchestration ────────────────────────────────────────────────
+
     def action_download(self) -> None:
-        if not self._selection:
-            return
-        needs_fetch = [
-            sid for sid, v in self._selection.items()
-            if v is None
-        ]
-        if needs_fetch:
-            self._fetch_and_exit(needs_fetch)
-        else:
-            self.exit(self._build_tracks())
+        if self._selection:
+            self._enqueue_selection()
+        if not isinstance(self.screen, DownloadScreen):
+            if self._queue or self._selection:
+                self.push_screen(DownloadScreen())
 
-    @work(thread=True)
-    def _fetch_and_exit(self, source_ids: list[str]) -> None:
-        for sid in source_ids:
-            source = self._source_registry.get(sid)
-            if source:
-                self._selection[sid] = get_tracks_for_source(self._sp, source)
-        self.call_from_thread(lambda: self.exit(self._build_tracks()))
+    @work(thread=True, group="enqueue")
+    def _enqueue_selection(self) -> None:
+        new_tracks: list[Track] = []
+        for sid, picked in list(self._selection.items()):
+            if picked is None:
+                src = self._source_registry.get(sid)
+                tracks = get_tracks_for_source(self._sp, src) if src else []
+            else:
+                tracks = picked
+            new_tracks.extend(tracks)
+        self._selection.clear()
+        for t in new_tracks:
+            if t.id in self._queued_ids or cache.contains(t.id):
+                continue
+            self._queued_ids.add(t.id)
+            self._queue.append(t)
+        self._ensure_worker()
 
-    def _build_tracks(self) -> list[Track]:
-        tracks: list[Track] = []
-        seen: set[str] = set()
-        for picked in self._selection.values():
-            for t in (picked or []):
-                if t.id not in seen:
-                    seen.add(t.id)
-                    tracks.append(t)
-        return tracks
+    def _ensure_worker(self) -> None:
+        if not self._worker_started:
+            self._worker_started = True
+            self._download_worker()
+
+    @work(thread=True, group="download")
+    def _download_worker(self) -> None:
+        while not self._closing:
+            if self._q_index < len(self._queue):
+                track = self._queue[self._q_index]
+                self._cur_name = track.name
+                self._cur_artist = track.artist
+                self._cur_album = track.album
+                self._cur_status = "Searching…"
+                self._spinning = True
+                self._track_start = time.monotonic()
+
+                def on_status(line: str) -> None:
+                    phase = _interpret(line)
+                    if phase:
+                        self._cur_status = phase
+
+                def on_proc(proc) -> None:
+                    self._cur_proc = proc
+
+                ok = _dl(track, self._output_dir, on_status, on_proc)
+                self._cur_proc = None
+                if ok:
+                    cache.add(track.id)
+                self._done.append((track, ok))
+                self._q_index += 1
+            else:
+                self._spinning = False
+                if self._q_index > 0:
+                    self._cur_name = "All caught up!"
+                    self._cur_artist = f"{self._q_index} downloaded"
+                    self._cur_album = ""
+                    self._cur_status = "Esc to browse · D to add more · Q to quit"
+                time.sleep(0.3)
+
+    def bg_status(self) -> str:
+        if not self._worker_started:
+            return ""
+        total = len(self._queue)
+        if self._q_index >= total and not self._spinning:
+            return f"✓ Downloads complete — {self._q_index} track(s)"
+        return f"▶ Downloading {min(self._q_index + 1, total)}/{total} · {self._cur_name}   (press D to view)"

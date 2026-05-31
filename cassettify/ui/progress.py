@@ -1,13 +1,10 @@
 from __future__ import annotations
 import re
 import time
-from typing import Callable
-from textual.app import App, ComposeResult
-from textual.widgets import Static, Header, Footer, Label
+from textual.app import ComposeResult
+from textual.screen import Screen
+from textual.widgets import Static, Header, Footer
 from textual.containers import Horizontal, Vertical, ScrollableContainer
-from textual import work
-from cassettify.spotify import Track
-from cassettify.downloader import download_track as _dl
 
 # ── Status interpretation ─────────────────────────────────────────────────────
 
@@ -45,118 +42,119 @@ def _interpret(line: str) -> str | None:
 
 # ── Cassette art ──────────────────────────────────────────────────────────────
 
-_LS = "─╲│╱"
-_RS = "─╱│╲"
+_BOX = 74
+_W = 30  # label window inner width
+
+# Rotating reel spokes — 5 wide, 5 tall, narrow glyphs only (no wide unicode)
+_SPOKES = [
+    ["  │  ", "  │  ", "──+──", "  │  ", "  │  "],
+    ["╲   ╱", " ╲ ╱ ", "  +  ", " ╱ ╲ ", "╱   ╲"],
+    ["─────", "     ", "──+──", "     ", "─────"],
+    ["╱   ╲", " ╱ ╲ ", "  +  ", " ╲ ╱ ", "╲   ╱"],
+]
 
 
 def _fit(s: str, w: int) -> str:
     return (s[:w - 1] + "…") if len(s) > w else s.ljust(w)
 
 
-def _cassette(
-    name: str, artist: str, album: str,
-    done: int, total: int,
-    status: str, tick: int, spinning: bool,
-) -> str:
-    lsp = _LS[tick % 4] if spinning else "·"
-    rsp = _RS[tick % 4] if spinning else "·"
+def _center(s: str, w: int) -> str:
+    s = s[:w]
+    pad = w - len(s)
+    left = pad // 2
+    return " " * left + s + " " * (pad - left)
 
-    n  = _fit(name,   20)
-    a  = _fit(artist, 20)
-    b  = _fit(album,  20)
-    ti = _fit(f"track {done} of {total}", 16)
-    st = _fit(status or "", 52)
 
-    BAR = 26
+def _reel(frame: int) -> list[str]:
+    sp = _SPOKES[frame]
+    return ["╭─────────╮", "│ ╭─────╮ │"] + [f"│ │{r}│ │" for r in sp] + ["│ ╰─────╯ │", "╰─────────╯"]
+
+
+def _cassette(name, artist, album, done, total, status, tick, spinning) -> str:
+    frame = tick % 4 if spinning else 0
+    lr = _reel(frame)
+    rr = _reel((frame + 2) % 4)
+    n, a, b = _fit(name, _W), _fit(artist, _W), _fit(album, _W)
+    BAR = 40
     filled = int(done / max(total, 1) * BAR)
     bar = "▓" * filled + "░" * (BAR - filled)
     pct = f"{int(done / max(total, 1) * 100)}%".rjust(4)
+    ti = f"track {done} of {total}"
 
-    HDR = _fit("  C A S S E T T I F Y           S I D E  A", 50)
+    def row(c: str) -> str:
+        return f"  ║{c[:_BOX].ljust(_BOX)}║"
 
-    return "\n".join([
-        f"  ╔{'═' * 56}╗",
-        f"  ║  ┌{'─' * 50}┐  ║",
-        f"  ║  │{HDR}│  ║",
-        f"  ║  └{'─' * 50}┘  ║",
-        f"  ║{' ' * 56}║",
-        f"  ║  ╭────────╮   ╔{'═' * 24}╗   ╭────────╮  ║",
-        f"  ║  │ ╭────╮ │   ║  {n}  ║   │ ╭────╮ │  ║",
-        f"  ║  │ │  {lsp} │ │   ║  {a}  ║   │ │  {rsp} │ │  ║",
-        f"  ║  │ ╰────╯ │   ║  {b}  ║   │ ╰────╯ │  ║",
-        f"  ║  ╰────────╯   ╚{'═' * 24}╝   ╰────────╯  ║",
-        f"  ║{' ' * 56}║",
-        f"  ║  {ti}   {bar}   {pct}  ║",
-        f"  ║  {st}  ║",
-        f"  ╚{'═' * 56}╝",
-    ])
+    label = [
+        "┌" + "─" * (_W + 2) + "┐",
+        "│ " + " " * _W + " │",
+        "│ " + n + " │",
+        "│ " + " " * _W + " │",
+        "│ " + a + " │",
+        "│ " + " " * _W + " │",
+        "│ " + b + " │",
+        "│ " + " " * _W + " │",
+        "└" + "─" * (_W + 2) + "┘",
+    ]
+    lines = [
+        "  ╔" + "═" * _BOX + "╗",
+        row(""),
+        row(_center("C A S S E T T I F Y   ·   SIDE A", _BOX)),
+        row(""),
+    ]
+    for i in range(9):
+        lines.append(row("  " + lr[i] + "   " + label[i] + "   " + rr[i]))
+    lines += [
+        row(""),
+        row("  " + ti + "   " + bar + "   " + pct),
+        row("  " + _fit(status or "", _BOX - 4)),
+        row(""),
+        "  ╚" + "═" * _BOX + "╝",
+    ]
+    return "\n".join(lines)
 
 
-# ── App ───────────────────────────────────────────────────────────────────────
+# ── Download screen (stateless view over app download state) ──────────────────
 
-class ProgressApp(App):
-
-    TITLE = "cassettify"
-    BINDINGS = [("q", "quit_app", "Quit")]
+class DownloadScreen(Screen):
 
     CSS = """
     #cassette {
-        height: 16;
+        height: 20;
         width: 100%;
         content-align: center middle;
         color: $primary;
         text-style: bold;
     }
     #panels { height: 1fr; margin: 0 2; }
-    #done-panel, #queue-panel { height: 1fr; width: 1fr; margin: 0 1; }
+    #queue-panel, #done-panel { height: 1fr; width: 1fr; margin: 0 1; }
     .panel-title { height: 1; text-style: bold; color: $text-muted; padding: 0 1; }
-    #done-list, #queue-list {
+    #queue-list, #done-list {
         height: 1fr;
         border: solid $surface;
         padding: 0 1;
         overflow-y: auto;
     }
-    .done-item  { color: $success; }
-    .fail-item  { color: $error; }
-    .queue-item { color: $text-muted; }
-    .downloading-item { color: $warning; text-style: bold; }
+    #queue-text { color: $text-muted; }
+    #done-text { color: $success; }
     """
 
-    def __init__(
-        self,
-        tracks: list[Track],
-        output_dir: str,
-        on_success: Callable[[Track], None] | None = None,
-    ) -> None:
-        super().__init__()
-        self._tracks     = tracks
-        self._output_dir = output_dir
-        self._on_success = on_success
-        self._cur_name   = ""
-        self._cur_artist = ""
-        self._cur_album  = ""
-        self._cur_status = ""
-        self._done       = 0
-        self._spinning   = False
-        self._tick       = 0
-        self._finished   = False
-        self._track_start = 0.0
+    BINDINGS = [
+        ("escape", "go_back", "Back to library"),
+        ("q", "quit_app", "Quit"),
+    ]
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=False)
-        yield Static(
-            _cassette("", "", "", 0, len(self._tracks), "", 0, False),
-            id="cassette",
-        )
+        yield Static("", id="cassette", markup=False)
         yield Horizontal(
             Vertical(
-                Static(f"Queue  ({len(self._tracks)} tracks)", classes="panel-title", id="queue-title"),
-                ScrollableContainer(id="queue-list"),
+                Static("Queue", classes="panel-title", id="queue-title"),
+                ScrollableContainer(Static("", id="queue-text", markup=False), id="queue-list"),
                 id="queue-panel",
             ),
             Vertical(
                 Static("✓  Done", classes="panel-title"),
-                ScrollableContainer(id="done-list"),
+                ScrollableContainer(Static("", id="done-text", markup=False), id="done-list"),
                 id="done-panel",
             ),
             id="panels",
@@ -164,82 +162,34 @@ class ProgressApp(App):
         yield Footer()
 
     def on_mount(self) -> None:
-        queue = self.query_one("#queue-list")
-        for t in self._tracks:
-            queue.mount(Label(f"  {t.artist} — {t.name}", classes="queue-item", id=f"q-{t.id}"))
-        self.set_interval(0.12, self._tick_frame)
-        self._run_all()
+        self.set_interval(0.12, self._tick)
 
-    def _tick_frame(self) -> None:
-        self._tick += 1
-        status = self._cur_status
-        if self._spinning and self._track_start:
-            elapsed = int(time.monotonic() - self._track_start)
-            status = f"{status}  ({elapsed}s)"
+    def _tick(self) -> None:
+        app = self.app
+        app._tick += 1
+        status = app._cur_status
+        if app._spinning and app._track_start:
+            status = f"{status}  ({int(time.monotonic() - app._track_start)}s)"
+        total = len(app._queue)
         self.query_one("#cassette", Static).update(
-            _cassette(
-                self._cur_name, self._cur_artist, self._cur_album,
-                self._done, len(self._tracks),
-                status, self._tick, self._spinning,
-            )
+            _cassette(app._cur_name, app._cur_artist, app._cur_album,
+                      app._q_index, total, status, app._tick, app._spinning)
         )
+        # Queue: current + upcoming (current marked ▶)
+        qlines = []
+        for i in range(app._q_index, total):
+            t = app._queue[i]
+            prefix = "▶ " if (i == app._q_index and app._spinning) else "  "
+            qlines.append(f"{prefix}{t.artist} — {t.name}")
+        self.query_one("#queue-text", Static).update("\n".join(qlines) or "  (nothing queued)")
+        self.query_one("#queue-title", Static).update(f"Queue  ({total - app._q_index} remaining)")
+        # Done
+        dlines = [f"{'✓' if ok else '✗'}  {t.name}" for t, ok in app._done]
+        self.query_one("#done-text", Static).update("\n".join(dlines) or "  (none yet)")
 
-    @work(thread=True)
-    def _run_all(self) -> None:
-        for track in self._tracks:
-            self._cur_name   = track.name
-            self._cur_artist = track.artist
-            self._cur_album  = track.album
-            self._cur_status = "Searching…"
-            self._spinning   = True
-            self._track_start = time.monotonic()
-
-            self.app.call_from_thread(self._mark_downloading, track)
-
-            def on_status(line: str) -> None:
-                phase = _interpret(line)
-                if phase:
-                    self._cur_status = phase
-
-            success = _dl(track, self._output_dir, on_status)
-
-            if success and self._on_success:
-                self._on_success(track)
-
-            self._done += 1
-            self.app.call_from_thread(self._finish_track, track, success)
-
-        self._finished   = True
-        self._spinning   = False
-        self._cur_name   = "All done!"
-        self._cur_artist = f"{self._done} tracks downloaded"
-        self._cur_album  = ""
-        self._cur_status = "Press Q to quit"
-
-    def _mark_downloading(self, track: Track) -> None:
-        # Keep the track in the queue, flag it as the one in progress
-        try:
-            lbl = self.query_one(f"#q-{track.id}", Label)
-            lbl.update(f"▶  {track.artist} — {track.name}")
-            lbl.add_class("downloading-item")
-        except Exception:
-            pass
-        remaining = len(self._tracks) - self._done
-        self.query_one("#queue-title", Static).update(f"Queue  ({remaining} remaining)")
-
-    def _finish_track(self, track: Track, success: bool) -> None:
-        try:
-            self.query_one(f"#q-{track.id}").remove()
-        except Exception:
-            pass
-        remaining = len(self._tracks) - self._done
-        self.query_one("#queue-title", Static).update(f"Queue  ({remaining} remaining)")
-        self.query_one("#done-list").mount(
-            Label(
-                f"✓  {track.name}" if success else f"✗  {track.name}",
-                classes="done-item" if success else "fail-item",
-            )
-        )
+    def action_go_back(self) -> None:
+        if len(self.app.screen_stack) > 1:
+            self.app.pop_screen()
 
     def action_quit_app(self) -> None:
-        self.exit()
+        self.app.exit()

@@ -15,8 +15,13 @@ def download_track(
     track: Track,
     output_dir: str,
     status_cb: Callable[[str], None] | None = None,
+    on_proc: Callable[[object], None] | None = None,
 ) -> bool:
-    """Download a single track via spotdl. Streams status lines to status_cb."""
+    """Download a single track via spotdl. Streams status lines to status_cb.
+
+    on_proc, if given, is called with the live subprocess so callers can
+    terminate it (e.g. on app quit).
+    """
     full_template = str(Path(output_dir) / _OUTPUT_TEMPLATE)
     cmd = [
         sys.executable, "-u", "-m", "spotdl",
@@ -37,6 +42,8 @@ def download_track(
             bufsize=1,
             env=env,
         )
+        if on_proc:
+            on_proc(proc)
         for line in proc.stdout:
             line = line.strip()
             if line and status_cb:

@@ -5,7 +5,7 @@ import typer
 from cassettify.config import Config
 from cassettify.auth import get_client
 from cassettify.spotify import get_playlists, get_tracks, find_playlist_by_name
-from cassettify.ui.app import run_wizard, run_picker, run_downloads
+from cassettify.ui.app import run_wizard, run_app
 
 app = typer.Typer(
     name="cassettify",
@@ -87,16 +87,13 @@ def main(
         tracks = []
         for pl in playlists:
             tracks.extend(get_tracks(sp, pl.id))
+        run_app(sp, output_dir, tracks)
     elif playlist:
         all_pls = get_playlists(sp)
         match = find_playlist_by_name(all_pls, playlist)
         if not match:
             typer.echo(f"Playlist '{playlist}' not found.", err=True)
             raise typer.Exit(code=1)
-        tracks = get_tracks(sp, match.id)
+        run_app(sp, output_dir, get_tracks(sp, match.id))
     else:
-        tracks = run_picker(sp)
-        if not tracks:
-            return
-
-    run_downloads(tracks, output_dir)
+        run_app(sp, output_dir)
