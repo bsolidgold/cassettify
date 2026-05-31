@@ -4,7 +4,7 @@ class Cassettify < Formula
   desc "Download your Spotify playlists for your iPod Classic"
   homepage "https://github.com/bsolidgold/cassettify"
   url "https://files.pythonhosted.org/packages/source/c/cassettify/cassettify-0.1.0.tar.gz"
-  sha256 "REPLACE_WITH_SHA256_AFTER_PYPI_RELEASE"
+  sha256 "65eaa26398778ca8e08d29b299e23717dff9590349437f0434640ff4225f5f3b"
   license "MIT"
 
   depends_on "python@3.11"
