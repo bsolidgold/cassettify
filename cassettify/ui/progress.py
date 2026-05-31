@@ -13,6 +13,7 @@ from cassettify.spotify import Track
 class ProgressApp(App):
     """Download progress display. Calls download_fn(track) -> bool per track."""
 
+    TITLE = "cassettify"
     BINDINGS = [("q", "quit_app", "Quit")]
 
     CSS = """

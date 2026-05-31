@@ -98,6 +98,7 @@ class OutputDirScreen(Screen):
 
 
 class WizardApp(App):
+    TITLE = "cassettify"
     CSS = """
     Screen { align: center middle; }
     .card {
