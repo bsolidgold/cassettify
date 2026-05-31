@@ -15,7 +15,7 @@ class TrackScreen(Screen):
         ("space", "toggle_track", "Select/Deselect"),
         ("a", "select_all", "Select All"),
         ("n", "select_none", "Select None"),
-        ("enter,escape", "confirm", "Done"),
+        ("escape", "confirm", "Done"),
     ]
 
     CSS = """
@@ -74,7 +74,7 @@ class TrackScreen(Screen):
         n = len(self._selected)
         total = len(self._tracks)
         self.query_one("#track-status", Static).update(
-            f"{n}/{total} selected  ·  Space toggle  ·  A all  ·  N none  ·  Enter/Esc done"
+            f"{n}/{total} selected  ·  Space toggle  ·  A all  ·  N none  ·  Esc done"
         )
 
     def action_toggle_track(self) -> None:
@@ -108,7 +108,6 @@ class SourceScreen(Screen):
 
     BINDINGS = [
         ("space", "toggle_source", "Select All"),
-        ("enter", "drill_in", "Browse Tracks"),
         ("d", "download", "Download"),
         ("slash", "focus_search", "Search"),
         ("escape", "quit_app", "Quit"),
@@ -167,7 +166,7 @@ class SourceScreen(Screen):
         n_sources = len(self._selection)
         self.query_one("#source-status", Static).update(
             f"{n_sources} source{'s' if n_sources != 1 else ''} selected  ·  "
-            "Space=select all  ·  Enter=browse tracks  ·  D=download  ·  /=search  ·  Esc=quit"
+            "Space=select all  ·  Enter=browse tracks  ·  D=download  ·  /=search"
         )
 
     def action_toggle_source(self) -> None:
@@ -183,7 +182,7 @@ class SourceScreen(Screen):
         self._refresh_table()
         table.move_cursor(row=row)
 
-    def action_drill_in(self) -> None:
+    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         table = self.query_one("#source-table", DataTable)
         row = table.cursor_row
         if row is None or row >= len(self._filtered):
