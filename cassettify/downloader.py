@@ -1,4 +1,5 @@
 from __future__ import annotations
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -17,9 +18,10 @@ def download_track(
     """Download a single track via spotdl. Streams status lines to status_cb."""
     full_template = str(Path(output_dir) / _OUTPUT_TEMPLATE)
     try:
+        env = {**os.environ, "PYTHONUNBUFFERED": "1"}
         proc = subprocess.Popen(
             [
-                sys.executable, "-m", "spotdl",
+                sys.executable, "-u", "-m", "spotdl",
                 track.spotify_url,
                 "--output", full_template,
                 "--format", "mp3",
@@ -27,6 +29,8 @@ def download_track(
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
+            bufsize=1,
+            env=env,
         )
         for line in proc.stdout:
             line = line.strip()

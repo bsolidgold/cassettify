@@ -1,4 +1,5 @@
 from __future__ import annotations
+import time
 from typing import Callable
 from textual.app import App, ComposeResult
 from textual.widgets import Static, Header, Footer, Label
@@ -103,6 +104,7 @@ class ProgressApp(App):
         self._spinning   = False
         self._tick       = 0
         self._finished   = False
+        self._track_start = 0.0
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=False)
@@ -134,11 +136,15 @@ class ProgressApp(App):
 
     def _tick_frame(self) -> None:
         self._tick += 1
+        status = self._cur_status
+        if self._spinning and self._track_start:
+            elapsed = int(time.monotonic() - self._track_start)
+            status = f"{status}  ({elapsed}s)"
         self.query_one("#cassette", Static).update(
             _cassette(
                 self._cur_name, self._cur_artist, self._cur_album,
                 self._done, len(self._tracks),
-                self._cur_status, self._tick, self._spinning,
+                status, self._tick, self._spinning,
             )
         )
 
@@ -150,6 +156,7 @@ class ProgressApp(App):
             self._cur_album  = track.album
             self._cur_status = "Searching…"
             self._spinning   = True
+            self._track_start = time.monotonic()
 
             self.app.call_from_thread(self._remove_from_queue, track)
 

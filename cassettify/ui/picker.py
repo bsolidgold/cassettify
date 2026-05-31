@@ -37,6 +37,7 @@ class TrackScreen(Screen):
         ("space", "toggle_track", "Select/Deselect"),
         ("a", "select_all", "Select All"),
         ("n", "select_none", "Select None"),
+        ("d", "commit_and_download", "Download"),
         ("escape", "confirm", "Done"),
     ]
 
@@ -115,6 +116,15 @@ class TrackScreen(Screen):
 
     def action_confirm(self) -> None:
         self.dismiss([t for t in self._tracks if t.id in self._selected])
+
+    def action_commit_and_download(self) -> None:
+        # Commit this screen's current selection, then trigger a download
+        selected = [t for t in self._tracks if t.id in self._selected]
+        if selected:
+            self.app._selection[self._source.id] = selected
+        elif self._source.id in self.app._selection:
+            del self.app._selection[self._source.id]
+        self.app.action_download()
 
 
 # ── Generic lazy-loading list screen ─────────────────────────────────────────
