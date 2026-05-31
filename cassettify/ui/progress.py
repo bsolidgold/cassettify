@@ -129,10 +129,10 @@ class ProgressApp(App):
         queue = self.query_one("#queue-list")
         for t in self._tracks:
             queue.mount(Label(f"  {t.artist} — {t.name}", classes="queue-item", id=f"q-{t.id}"))
-        self.set_interval(0.12, self._animate)
+        self.set_interval(0.12, self._tick_frame)
         self._run_all()
 
-    def _animate(self) -> None:
+    def _tick_frame(self) -> None:
         self._tick += 1
         self.query_one("#cassette", Static).update(
             _cassette(
