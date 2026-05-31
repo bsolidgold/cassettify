@@ -14,6 +14,7 @@ from cassettify.spotify import (
     get_playlists, get_followed_artists, get_artist_albums,
 )
 from cassettify import cache
+from cassettify import session
 from cassettify.downloader import download_track as _dl
 from cassettify.ui.progress import DownloadScreen, _interpret
 import spotipy
@@ -561,15 +562,17 @@ class CassettifyApp(App):
         self._worker_started = False
         self._closing = False
         self._cur_proc = None
+        self._session_cleared = False
 
     def on_mount(self) -> None:
         self.push_screen(CategoryScreen())
-        if self._initial_tracks:
-            for t in self._initial_tracks:
-                if t.id in self._queued_ids or cache.contains(t.id):
-                    continue
-                self._queued_ids.add(t.id)
-                self._queue.append(t)
+        # Clean up any partial files from a previous interrupted run, then resume
+        # whatever was still queued (plus anything passed in via --all / a name).
+        session.cleanup_partials(self._output_dir)
+        resume = session.load_pending()
+        start = self._initial_tracks + resume
+        if start:
+            self._enqueue_tracks(start)
             self._ensure_worker()
             self.push_screen(DownloadScreen())
 
@@ -598,6 +601,15 @@ class CassettifyApp(App):
             if self._queue or self._selection:
                 self.push_screen(DownloadScreen())
 
+    def _enqueue_tracks(self, tracks: list[Track]) -> None:
+        for t in tracks:
+            if t.id in self._queued_ids or cache.contains(t.id):
+                continue
+            self._queued_ids.add(t.id)
+            self._queue.append(t)
+        session.save_pending(self._queue[self._q_index:])
+        self._session_cleared = False
+
     @work(thread=True, group="enqueue")
     def _enqueue_selection(self) -> None:
         new_tracks: list[Track] = []
@@ -609,11 +621,7 @@ class CassettifyApp(App):
                 tracks = picked
             new_tracks.extend(tracks)
         self._selection.clear()
-        for t in new_tracks:
-            if t.id in self._queued_ids or cache.contains(t.id):
-                continue
-            self._queued_ids.add(t.id)
-            self._queue.append(t)
+        self._enqueue_tracks(new_tracks)
         self._ensure_worker()
 
     def _ensure_worker(self) -> None:
@@ -647,7 +655,12 @@ class CassettifyApp(App):
                     cache.add(track.id)
                 self._done.append((track, ok))
                 self._q_index += 1
+                # Persist what's left so an interrupted run resumes from here
+                session.save_pending(self._queue[self._q_index:])
             else:
+                if self._spinning or not self._session_cleared:
+                    session.clear()
+                    self._session_cleared = True
                 self._spinning = False
                 if self._q_index > 0:
                     self._cur_name = "All caught up!"
