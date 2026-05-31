@@ -196,6 +196,7 @@ class SourceScreen(Screen):
                 del self._selection[source.id]
             self._refresh_table()
             table.focus()
+            table.move_cursor(row=row)
 
         self.app.push_screen(TrackScreen(source, self._sp), handle_result)
 
