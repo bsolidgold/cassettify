@@ -59,8 +59,7 @@ class TrackScreen(Screen):
 
     def _on_tracks_loaded(self, tracks: list[Track]) -> None:
         self._tracks = tracks
-        # Pre-select all by default
-        self._selected = {t.id for t in tracks}
+        self._selected = set()
         self.query_one("#loader").remove_class("visible")
         self._refresh_table()
         self.query_one("#track-table", DataTable).focus()
