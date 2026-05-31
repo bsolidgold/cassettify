@@ -22,6 +22,30 @@ def _ensure_config() -> Config:
     return config
 
 
+def _grab_cookies(browser: Optional[str]) -> None:
+    from cassettify import cookies as ck
+    typer.echo("Grabbing YouTube cookies (your browser or keychain may ask for permission)...")
+    found = ck.extract(browser)
+    if found:
+        typer.echo(f"✓ Saved {found} cookies to {ck.COOKIE_FILE}")
+    else:
+        typer.echo("Couldn't read cookies from any browser. Downloads will still work but may hit rate limits.", err=True)
+
+
+def _ensure_cookies() -> None:
+    """On first run, try to auto-grab cookies so downloads aren't rate-limited."""
+    from cassettify import cookies as ck
+    if ck.COOKIE_FILE.exists():
+        return
+    typer.echo("Setting up YouTube access for downloads (your browser/keychain may prompt)...")
+    found = ck.extract()
+    if found:
+        typer.echo(f"✓ Using {found} cookies — downloads won't be rate-limited.")
+    else:
+        typer.echo("(No browser cookies found — that's fine, but you may hit YouTube rate limits.")
+        typer.echo(" You can retry later with: cassettify --cookies auto)")
+
+
 @app.callback(invoke_without_command=True)
 def main(
     ctx: typer.Context,
@@ -37,6 +61,10 @@ def main(
     setup: bool = typer.Option(
         False, "--setup", help="Re-run the first-time setup wizard"
     ),
+    cookies: Optional[str] = typer.Option(
+        None, "--cookies",
+        help="Grab YouTube cookies from a browser (chrome/safari/firefox/edge/brave/... or 'auto') and exit",
+    ),
 ) -> None:
     if ctx.invoked_subcommand is not None:
         return
@@ -45,8 +73,13 @@ def main(
         run_wizard()
         return
 
+    if cookies is not None:
+        _grab_cookies(None if cookies in ("", "auto") else cookies)
+        return
+
     config = _ensure_config()
     output_dir = str(output) if output else config.output_dir
+    _ensure_cookies()
     sp = get_client(config)
 
     if all_playlists:

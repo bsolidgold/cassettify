@@ -5,9 +5,9 @@ import sys
 from pathlib import Path
 from typing import Callable
 from cassettify.spotify import Track
+from cassettify.cookies import COOKIE_FILE
 
 FAILED_LOG = Path.home() / ".cassettify" / "failed.log"
-COOKIE_FILE = Path.home() / ".cassettify" / "cookies.txt"
 _OUTPUT_TEMPLATE = "{artists}/{album}/{track-number} - {title}.{output-ext}"
 
 
